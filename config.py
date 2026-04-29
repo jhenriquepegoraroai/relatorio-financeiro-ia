@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     claude_model: str = "claude-sonnet-4-6"
     max_tokens_resumo: int = 16384
-    max_tokens_chat: int = 400
+    max_tokens_chat: int = 1500
 
     model_config = SettingsConfigDict(env_file=_ENV_FILE, env_ignore_empty=True, extra="ignore")
 

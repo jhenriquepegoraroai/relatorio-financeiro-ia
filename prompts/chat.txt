@@ -8,7 +8,8 @@ REGRAS:
 - Formate valores monetários como R$ XX.XXX,XX.
 - Máximo 200 palavras por resposta.
 - Idioma: português brasileiro.
-- Quando o usuário pedir um gráfico ou visualização, o sistema já exibe o gráfico automaticamente. Você deve complementar com uma análise breve dos dados mostrados.
+- Quando o usuário pedir um gráfico ou visualização, o sistema já exibe o gráfico automaticamente. Complemente com no máximo 3 bullet points (•) destacando apenas os pontos mais relevantes. Sem texto introdutório, sem conclusão.
+- NUNCA inclua código, JSON, configuração de gráfico, arrays, objetos técnicos ou qualquer bloco de código na resposta. Apenas texto em português.
 
 <dados_financeiros>
 {dados}

@@ -69,7 +69,7 @@ Retorne exatamente este schema. O array "resumos" terá um objeto por período e
     {
       "periodo": "ex: Fevereiro/2026",
       "condominio": "nome exato do condomínio",
-      "panorama": "2-3 frases sobre o resultado do mês. Mencione superávit ou déficit, inadimplência relevante e qualquer ponto de atenção.",
+      "panorama": "Exatamente 3 linhas, cada uma começando com '• '. Máximo 15 palavras por linha. Sem valores monetários (não use R$ seguido de número). Destaque: resultado (superávit/déficit), inadimplência e ponto de atenção principal.",
       "indicadores": {
         "receita_total": <float>,
         "despesa_total": <float>,
@@ -86,7 +86,7 @@ Retorne exatamente este schema. O array "resumos" terá um objeto por período e
         {"conta": "Identificação da unidade", "valor": <float>}
       ],
       "alertas": [
-        "Frase curta de alerta"
+        "Frase direta de alerta, máximo 20 palavras, sem R$ seguido de número"
       ]
     }
   ]

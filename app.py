@@ -10,7 +10,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from config import settings
-from core.claude import gerar_resumo, stream_chat
+from core.claude import gerar_resumo, stream_chat, classificar_grafico
 from core.extractor import extrair_texto
 from core.formatters import brl
 from core.models import ResumoFinanceiro
@@ -21,18 +21,54 @@ st.set_page_config(
     layout="wide",
 )
 
+# ─── Design System: Heritage Corporate ───────────────────────────────────────
+
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Work+Sans:wght@500;600&family=Inter:wght@400;500;600&display=swap');
+
+/* Headings → Work Sans */
+h1, h2, h3,
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2 {
+    font-family: 'Work Sans', sans-serif !important;
+    color: #7a0022 !important;
+}
+
+/* Body / labels / inputs / tabelas → Inter */
+html, body, .stMarkdown, p,
+input, textarea, label, .stChatMessage,
+table, td, th, li {
+    font-family: 'Inter', sans-serif !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ─── Auto-scroll ──────────────────────────────────────────────────────────────
 
 _SCROLL_JS = """
 <script>
-setTimeout(function() {
-    var sel = ['[data-testid="stAppViewContainer"]', 'section.main', '.main'];
-    for (var i = 0; i < sel.length; i++) {
-        var el = window.parent.document.querySelector(sel[i]);
-        if (el) { el.scrollTop = el.scrollHeight; return; }
+(function() {
+    var SELECTORS = ['[data-testid="stAppViewContainer"]', 'section.main', '.main'];
+    function getTarget() {
+        for (var i = 0; i < SELECTORS.length; i++) {
+            var el = window.parent.document.querySelector(SELECTORS[i]);
+            if (el) return el;
+        }
+        return null;
     }
-    window.parent.scrollTo(0, window.parent.document.body.scrollHeight);
-}, 150);
+    function scrollDown(t) {
+        if (t) t.scrollTop = t.scrollHeight;
+        else window.parent.scrollTo(0, window.parent.document.body.scrollHeight);
+    }
+    var target = getTarget();
+    scrollDown(target);
+    if (target) {
+        var obs = new MutationObserver(function() { scrollDown(target); });
+        obs.observe(target, { childList: true, subtree: true, characterData: true });
+        setTimeout(function() { obs.disconnect(); }, 15000);
+    }
+})();
 </script>
 """
 
@@ -85,25 +121,25 @@ def _alinhar(listas: list, key_fn) -> dict[str, list[float]]:
 # ─── Helpers de estilo HTML ───────────────────────────────────────────────────
 
 _C = {
-    "titulo":    "background:#1a3a6b;color:white;font-weight:bold;text-align:center;padding:10px 8px;font-size:1.05em;",
-    "subtitulo": "background:#2a4a8b;color:white;text-align:center;padding:4px 8px;font-size:0.88em;",
-    "sec_blu":   "background:#2e6da4;color:white;font-weight:bold;padding:5px 10px;",
-    "sec_red":   "background:#8b2222;color:white;font-weight:bold;padding:5px 10px;",
-    "col_hdr":   "background:#1a3a6b;color:white;font-weight:bold;padding:5px 10px;text-align:right;white-space:nowrap;",
-    "col_hdr_l": "background:#1a3a6b;color:white;font-weight:bold;padding:5px 10px;text-align:left;",
-    "tot":       "background:#c8d8e8;font-weight:bold;padding:5px 10px;text-align:right;",
-    "tot_l":     "background:#c8d8e8;font-weight:bold;padding:5px 10px;text-align:left;",
-    "res":       "background:#1a3a6b;color:white;font-weight:bold;padding:5px 10px;text-align:right;",
-    "res_l":     "background:#1a3a6b;color:white;font-weight:bold;padding:5px 10px;text-align:left;",
-    "d0":        "background:white;padding:4px 10px;text-align:right;border-bottom:1px solid #eee;",
-    "d0l":       "background:white;padding:4px 10px;text-align:left;border-bottom:1px solid #eee;",
-    "d1":        "background:#f4f7fb;padding:4px 10px;text-align:right;border-bottom:1px solid #eee;",
-    "d1l":       "background:#f4f7fb;padding:4px 10px;text-align:left;border-bottom:1px solid #eee;",
+    "titulo":    "background:#7a0022;color:white;font-weight:bold;text-align:center;padding:10px 8px;font-size:1.05em;",
+    "subtitulo": "background:#a30c33;color:white;text-align:center;padding:4px 8px;font-size:0.88em;",
+    "sec_blu":   "background:#a30c33;color:white;font-weight:bold;padding:5px 10px;",
+    "sec_red":   "background:#7a0022;color:white;font-weight:bold;padding:5px 10px;",
+    "col_hdr":   "background:#7a0022;color:white;font-weight:bold;padding:5px 10px;text-align:right;white-space:nowrap;",
+    "col_hdr_l": "background:#7a0022;color:white;font-weight:bold;padding:5px 10px;text-align:left;",
+    "tot":       "background:#e2e2e2;font-weight:bold;padding:5px 10px;text-align:right;",
+    "tot_l":     "background:#e2e2e2;font-weight:bold;padding:5px 10px;text-align:left;",
+    "res":       "background:#7a0022;color:white;font-weight:bold;padding:5px 10px;text-align:right;",
+    "res_l":     "background:#7a0022;color:white;font-weight:bold;padding:5px 10px;text-align:left;",
+    "d0":        "background:#ffffff;padding:4px 10px;text-align:right;border-bottom:1px solid #e1bebf;",
+    "d0l":       "background:#ffffff;padding:4px 10px;text-align:left;border-bottom:1px solid #e1bebf;",
+    "d1":        "background:#f3f3f3;padding:4px 10px;text-align:right;border-bottom:1px solid #e1bebf;",
+    "d1l":       "background:#f3f3f3;padding:4px 10px;text-align:left;border-bottom:1px solid #e1bebf;",
 }
 
 def _var_css(v: float) -> str:
-    if v > 0: return "color:#006400;font-weight:bold;"
-    if v < 0: return "color:#cc0000;font-weight:bold;"
+    if v > 0: return "color:#006d2f;font-weight:bold;"
+    if v < 0: return "color:#ba1a1a;font-weight:bold;"
     return ""
 
 def _fmt_var(v: float) -> str:
@@ -158,7 +194,7 @@ def _row_resultado(label, vals, com_var):
 def _tabela(inner):
     return (
         '<table style="width:100%;border-collapse:collapse;'
-        'font-size:0.83em;margin-bottom:12px;">'
+        'font-size:0.83em;margin-bottom:12px;font-family:Inter,sans-serif;">'
         + inner + "</table>"
     )
 
@@ -229,18 +265,37 @@ def exibir_relatorio(periodos: list[ResumoFinanceiro]):
         html += _row_total("TOTAL INADIMPLÊNCIA", inad_tot, cv)
         st.markdown(_tabela(html), unsafe_allow_html=True)
 
-    # ── PANORAMA E ALERTAS (colapsado) ────────────────────────────────────────
-    with st.expander("📝 Análise e Alertas"):
+    # ── PANORAMA E ALERTAS (expandido por padrão) ─────────────────────────────
+    with st.expander("📝 Análise e Alertas", expanded=True):
         for p in periodos:
             if n > 1:
-                st.caption(f"**{p.periodo}**")
-            st.info(p.panorama)
-            for alerta in p.alertas:
-                st.warning(alerta)
+                st.markdown(f"<p style='font-family:Inter,sans-serif;font-weight:600;"
+                            f"color:#7a0022;margin:8px 0 4px;'>{p.periodo}</p>",
+                            unsafe_allow_html=True)
+            # Une panorama (3 bullets) + alertas, limitado a 5 itens no total
+            linhas_panorama = [l.lstrip("• ").strip() for l in p.panorama.splitlines() if l.strip()]
+            extras = p.alertas[: max(0, 5 - len(linhas_panorama))]
+            itens = linhas_panorama + extras
+            bullets_html = "".join(
+                f'<li style="margin-bottom:5px;">{item}</li>' for item in itens
+            )
+            st.markdown(
+                f'<ul style="font-family:Inter,sans-serif;font-size:14px;line-height:1.7;'
+                f'padding-left:20px;margin:4px 0 12px;">'
+                f'{bullets_html}</ul>',
+                unsafe_allow_html=True,
+            )
 
 # ─── Gráficos no chat ────────────────────────────────────────────────────────
 
-_CHART_KEYWORDS = {"gráfico", "grafico", "chart", "visualiz", "plotar", "plote"}
+# Pré-filtro rápido: se nenhuma dessas palavras aparecer, não chama o Claude.
+_CHART_KEYWORDS = {
+    "gráfico", "grafico", "chart", "visualiz", "plotar", "plote",
+    "mostre", "mostra", "mostrar", "exibir", "exibe",
+    "ver", "quero ver", "gere", "crie", "faça", "faz",
+    "compare", "comparar", "evolução", "evolucao",
+    "consegue", "tem como", "pode", "quero", "preciso", "gostaria",
+}
 
 _MESES = [
     "jan", "fev", "mar", "abr", "mai", "jun",
@@ -255,36 +310,48 @@ def _extrair_periodo_da_mensagem(m: str) -> str | None:
             return mes
     return None
 
-def _detectar_tipo_grafico(msg: str) -> tuple[str | None, str | None]:
+def _detectar_tipo_grafico(msg: str, api_key: str) -> tuple[str | None, str | None, str | None, str | None]:
+    """Pré-filtra por keywords e delega ao Claude para entender o contexto.
+    Retorna (tipo, periodo_hint, categoria_filtro, orientacao)."""
     m = msg.lower()
     if not any(k in m for k in _CHART_KEYWORDS):
-        return None, None
-    if "inadimpl" in m:
-        return "inadimplencia", None
-    if "vs" in m or "versus" in m or ("receita" in m and "despesa" in m):
-        return "receitas_vs_despesas", None
-    if "comparativ" in m and "despesa" in m:
-        return "despesas_comparativo", None
-    if "detalh" in m and "despesa" in m:
-        return "despesas_periodo", _extrair_periodo_da_mensagem(m)
-    if "receita" in m:
-        return "receitas", None
-    if "despesa" in m or "custo" in m:
-        return "despesas", None
-    return "comparacao", None
+        return None, None, None, None
+    resultado = classificar_grafico(api_key, msg)
+    tipo = resultado.get("tipo")
+    if tipo is None:
+        return None, None, None, None
+    periodo_hint = resultado.get("periodo") or (
+        _extrair_periodo_da_mensagem(m) if tipo in ("despesas_periodo", "pizza") else None
+    )
+    return tipo, periodo_hint, resultado.get("categoria"), resultado.get("orientacao")
 
-def _grafico_por_tipo(tipo: str, periodos: list[ResumoFinanceiro], periodo_hint: str | None = None):
+def _grafico_por_tipo(
+    tipo: str,
+    periodos: list[ResumoFinanceiro],
+    periodo_hint: str | None = None,
+    categoria_filtro: str | None = None,
+    orientacao: str | None = None,
+):
     import pandas as pd
+    from collections import defaultdict
     periodos_ord = sorted(periodos, key=_sort_key)
     ultimo = periodos_ord[-1]
+    # Orientação: vertical = "v" (padrão para barras), horizontal = "h"
+    _vert = orientacao == "vertical"
+    _horiz = orientacao == "horizontal"
+
     if tipo == "receitas":
+        orient = "v" if _vert else "h"
+        x_vals = [i.descricao for i in ultimo.receitas] if _vert else [i.valor for i in ultimo.receitas]
+        y_vals = [i.valor for i in ultimo.receitas] if _vert else [i.descricao for i in ultimo.receitas]
         fig = px.bar(
-            x=[i.valor for i in ultimo.receitas],
-            y=[i.descricao for i in ultimo.receitas],
-            orientation="h", title=f"Receitas — {ultimo.periodo}",
-            color_discrete_sequence=["#2ecc71"],
-            labels={"x": "Valor (R$)", "y": ""},
+            x=x_vals, y=y_vals,
+            orientation=orient, title=f"Receitas — {ultimo.periodo}",
+            color_discrete_sequence=["#006d2f"],
+            labels={"x": "Valor (R$)" if _vert else "", "y": "" if _vert else "Valor (R$)"},
         )
+        if _vert:
+            fig.update_layout(xaxis_tickangle=-30)
     elif tipo == "despesas":
         fig = go.Figure(go.Pie(
             labels=[i.descricao for i in ultimo.despesas],
@@ -293,42 +360,56 @@ def _grafico_por_tipo(tipo: str, periodos: list[ResumoFinanceiro], periodo_hint:
         ))
         fig.update_layout(title=f"Composição das Despesas — {ultimo.periodo}", showlegend=False)
     elif tipo == "inadimplencia":
+        orient = "v" if _vert else "h"
+        x_vals = [i.conta for i in ultimo.inadimplencia] if _vert else [i.valor for i in ultimo.inadimplencia]
+        y_vals = [i.valor for i in ultimo.inadimplencia] if _vert else [i.conta for i in ultimo.inadimplencia]
         fig = px.bar(
-            x=[i.valor for i in ultimo.inadimplencia],
-            y=[i.conta  for i in ultimo.inadimplencia],
-            orientation="h", title=f"Inadimplência — {ultimo.periodo}",
-            color_discrete_sequence=["#e74c3c"],
-            labels={"x": "Valor (R$)", "y": ""},
+            x=x_vals, y=y_vals,
+            orientation=orient, title=f"Inadimplência — {ultimo.periodo}",
+            color_discrete_sequence=["#7a0022"],
+            labels={"x": "Valor (R$)" if _vert else "", "y": "" if _vert else "Valor (R$)"},
         )
+        if _vert:
+            fig.update_layout(xaxis_tickangle=-30)
     elif tipo == "receitas_vs_despesas":
-        fig = go.Figure([
-            go.Bar(
-                name="Receitas",
-                x=[p.periodo for p in periodos_ord],
-                y=[p.indicadores.receita_total for p in periodos_ord],
-                marker_color="#2ecc71",
-            ),
-            go.Bar(
-                name="Despesas",
-                x=[p.periodo for p in periodos_ord],
-                y=[p.indicadores.despesa_total for p in periodos_ord],
-                marker_color="#e74c3c",
-            ),
-        ])
-        fig.update_layout(barmode="group", title="Receitas vs Despesas por Período",
-                          yaxis_title="Valor (R$)")
+        # Padrão: vertical. Horizontal se pedido explicitamente.
+        if _horiz:
+            fig = go.Figure([
+                go.Bar(name="Receitas", y=[p.periodo for p in periodos_ord],
+                       x=[p.indicadores.receita_total for p in periodos_ord],
+                       marker_color="#006d2f", orientation="h"),
+                go.Bar(name="Despesas", y=[p.periodo for p in periodos_ord],
+                       x=[p.indicadores.despesa_total for p in periodos_ord],
+                       marker_color="#7a0022", orientation="h"),
+            ])
+            fig.update_layout(barmode="group", title="Receitas vs Despesas por Período",
+                              xaxis_title="Valor (R$)")
+        else:
+            fig = go.Figure([
+                go.Bar(name="Receitas", x=[p.periodo for p in periodos_ord],
+                       y=[p.indicadores.receita_total for p in periodos_ord],
+                       marker_color="#006d2f"),
+                go.Bar(name="Despesas", x=[p.periodo for p in periodos_ord],
+                       y=[p.indicadores.despesa_total for p in periodos_ord],
+                       marker_color="#7a0022"),
+            ])
+            fig.update_layout(barmode="group", title="Receitas vs Despesas por Período",
+                              yaxis_title="Valor (R$)")
     elif tipo == "despesas_comparativo":
         rows = [
             {"periodo": p.periodo, "categoria": i.descricao, "valor": i.valor}
             for p in periodos_ord for i in p.despesas
         ]
         df = pd.DataFrame(rows)
-        fig = px.bar(
-            df, x="categoria", y="valor", color="periodo", barmode="group",
-            title="Despesas por Categoria entre Períodos",
-            labels={"valor": "Valor (R$)", "categoria": ""},
-        )
-        fig.update_layout(xaxis_tickangle=-30)
+        if _horiz:
+            fig = px.bar(df, x="valor", y="categoria", color="periodo", barmode="group",
+                         orientation="h", title="Despesas por Categoria entre Períodos",
+                         labels={"valor": "Valor (R$)", "categoria": ""})
+        else:
+            fig = px.bar(df, x="categoria", y="valor", color="periodo", barmode="group",
+                         title="Despesas por Categoria entre Períodos",
+                         labels={"valor": "Valor (R$)", "categoria": ""})
+            fig.update_layout(xaxis_tickangle=-30)
     elif tipo == "despesas_periodo":
         if periodo_hint:
             matches = [p for p in periodos_ord if periodo_hint in p.periodo.lower()]
@@ -341,8 +422,26 @@ def _grafico_por_tipo(tipo: str, periodos: list[ResumoFinanceiro], periodo_hint:
             hole=0.45, textinfo="percent+label",
         ))
         fig.update_layout(title=f"Detalhamento das Despesas — {target.periodo}", showlegend=False)
+    elif tipo == "pizza":
+        cat = (categoria_filtro or "").lower()
+        totais: dict[str, float] = defaultdict(float)
+        for p in periodos_ord:
+            for item in p.despesas + p.receitas:
+                if not cat or cat in item.descricao.lower():
+                    totais[item.descricao] += item.valor
+        if totais:
+            titulo = f"Pizza — {categoria_filtro.title()}" if categoria_filtro else "Pizza — Todas as Categorias"
+            fig = go.Figure(go.Pie(
+                labels=list(totais.keys()),
+                values=list(totais.values()),
+                hole=0.35, textinfo="percent",
+            ))
+            fig.update_layout(title=titulo, showlegend=True, legend=dict(orientation="v"))
+        else:
+            fig = go.Figure()
+            fig.update_layout(title=f"Nenhum item encontrado para '{categoria_filtro}'")
     else:
-        # Comparação entre períodos (receitas + despesas)
+        # Comparação entre períodos (receitas + despesas) — padrão horizontal
         rows = []
         for p in periodos_ord:
             for i in p.receitas:
@@ -350,13 +449,83 @@ def _grafico_por_tipo(tipo: str, periodos: list[ResumoFinanceiro], periodo_hint:
             for i in p.despesas:
                 rows.append({"periodo": p.periodo, "categoria": i.descricao, "valor": i.valor, "tipo": "Despesa"})
         df = pd.DataFrame(rows)
-        fig = px.bar(
-            df, x="valor", y="categoria", color="periodo", orientation="h",
-            barmode="group", title="Comparativo por Período",
-            labels={"valor": "Valor (R$)", "categoria": ""},
-        )
+        orient = "v" if _vert else "h"
+        if _vert:
+            fig = px.bar(df, x="categoria", y="valor", color="periodo",
+                         barmode="group", title="Comparativo por Período",
+                         labels={"valor": "Valor (R$)", "categoria": ""})
+            fig.update_layout(xaxis_tickangle=-30)
+        else:
+            fig = px.bar(df, x="valor", y="categoria", color="periodo", orientation="h",
+                         barmode="group", title="Comparativo por Período",
+                         labels={"valor": "Valor (R$)", "categoria": ""})
     fig.update_layout(margin=dict(l=0, r=0, t=40, b=0), height=340)
     return fig
+
+# ─── Chips de sugestão ───────────────────────────────────────────────────────
+
+_SUGESTOES_UNICO = [
+    ("Resumo do período",           "Faça um resumo executivo do período, destacando os pontos mais importantes."),
+    ("Principais alertas",          "Quais são os principais alertas financeiros que devo me preocupar neste período?"),
+    ("Gráfico receitas vs despesas","Mostre um gráfico de receitas vs despesas deste período."),
+    ("Analisar inadimplência",      "Analise a inadimplência: quem são os maiores devedores e qual o impacto no caixa?"),
+]
+
+_SUGESTOES_MULTI = [
+    ("Evolução receitas vs despesas","Mostre um gráfico comparando a evolução de receitas vs despesas entre os períodos."),
+    ("Comparativo de despesas",      "Compare as categorias de despesas entre os períodos e identifique variações relevantes."),
+    ("Tendência da inadimplência",   "Como a inadimplência evoluiu entre os períodos? Há tendência de piora ou melhora?"),
+    ("Melhor e pior período",        "Qual foi o melhor e o pior período financeiro e por quê?"),
+    ("Recomendações de gestão",      "Com base em todos os períodos, quais recomendações de gestão financeira você sugere?"),
+]
+
+_CHIP_CSS = """
+<style>
+.chip-anchor + div [data-testid="stButton"] button {
+    background: linear-gradient(135deg, #7a0022 0%, #a30c33 100%);
+    color: white !important;
+    border: none;
+    border-radius: 20px;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.78em;
+    font-weight: 500;
+    padding: 6px 16px;
+    cursor: pointer;
+    transition: opacity 0.15s ease, transform 0.1s ease;
+    white-space: nowrap;
+    letter-spacing: 0.01em;
+    width: auto !important;
+    min-width: 0 !important;
+}
+.chip-anchor + div [data-testid="stButton"] button:hover {
+    opacity: 0.82;
+    transform: translateY(-1px);
+}
+.chip-anchor + div [data-testid="stButton"] button:active {
+    opacity: 1;
+    transform: translateY(0);
+}
+</style>
+"""
+
+def _chips_sugestao(n_periodos: int) -> None:
+    if st.session_state["chat_historico"]:
+        return
+    sugestoes = _SUGESTOES_UNICO if n_periodos == 1 else _SUGESTOES_MULTI
+    st.markdown(_CHIP_CSS, unsafe_allow_html=True)
+    st.markdown(
+        '<p style="font-family:Inter,sans-serif;font-size:0.82em;'
+        'color:#888;margin:6px 0 4px;">Sugestões para começar:</p>',
+        unsafe_allow_html=True,
+    )
+    st.markdown('<div class="chip-anchor"></div>', unsafe_allow_html=True)
+    cols = st.columns(len(sugestoes))
+    for col, (label, pergunta_completa) in zip(cols, sugestoes):
+        with col:
+            if st.button(label, key=f"chip_{label}", use_container_width=True):
+                st.session_state["sugestao_pendente"] = pergunta_completa
+                st.rerun()
+
 
 # ─── UI ───────────────────────────────────────────────────────────────────────
 
@@ -375,7 +544,13 @@ with st.sidebar:
 
 # ─── Estado da sessão ─────────────────────────────────────────────────────────
 
-for k, v in [("resumos", []), ("dados_chat", ""), ("chat_historico", []), ("resumo_gerado", False)]:
+for k, v in [
+    ("resumos", []),
+    ("dados_chat", ""),
+    ("chat_historico", []),
+    ("resumo_gerado", False),
+    ("sugestao_pendente", None),
+]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -422,8 +597,9 @@ if gerar:
         st.session_state["dados_chat"]     = _json.dumps(
             [r.model_dump() for r in resumos], ensure_ascii=False, indent=2
         )
-        st.session_state["chat_historico"] = []
-        st.session_state["resumo_gerado"]  = True
+        st.session_state["chat_historico"]   = []
+        st.session_state["sugestao_pendente"] = None
+        st.session_state["resumo_gerado"]     = True
 
 # ─── Exibição ─────────────────────────────────────────────────────────────────
 
@@ -433,6 +609,7 @@ if st.session_state["resumo_gerado"] and st.session_state["resumos"]:
 
     st.divider()
     st.subheader("Chat com os Relatórios")
+    _chips_sugestao(len(st.session_state["resumos"]))
 
     for msg in st.session_state["chat_historico"]:
         with st.chat_message(msg["role"]):
@@ -442,6 +619,8 @@ if st.session_state["resumo_gerado"] and st.session_state["resumos"]:
                         msg["chart_type"],
                         st.session_state["resumos"],
                         msg.get("periodo_hint"),
+                        msg.get("categoria_filtro"),
+                        msg.get("orientacao"),
                     ),
                     use_container_width=True,
                 )
@@ -451,9 +630,12 @@ if st.session_state["resumo_gerado"] and st.session_state["resumos"]:
     if st.session_state["chat_historico"]:
         components.html(_SCROLL_JS, height=0)
 
-    pergunta = st.chat_input("Pergunte sobre os relatórios financeiros…")
+    pergunta = st.session_state.pop("sugestao_pendente", None) or st.chat_input(
+        "Pergunte sobre os relatórios financeiros…"
+    )
     if pergunta:
-        tipo_grafico, periodo_hint = _detectar_tipo_grafico(pergunta)
+        tipo_grafico, periodo_hint, categoria_filtro, orientacao = _detectar_tipo_grafico(pergunta, _api_key())
+        components.html(_SCROLL_JS, height=0)
 
         with st.chat_message("user"):
             st.markdown(pergunta)
@@ -461,17 +643,19 @@ if st.session_state["resumo_gerado"] and st.session_state["resumos"]:
         with st.chat_message("assistant"):
             if tipo_grafico:
                 st.plotly_chart(
-                    _grafico_por_tipo(tipo_grafico, st.session_state["resumos"], periodo_hint),
+                    _grafico_por_tipo(tipo_grafico, st.session_state["resumos"], periodo_hint, categoria_filtro, orientacao),
                     use_container_width=True,
                 )
-            resposta = st.write_stream(
-                stream_chat(
-                    api_key=_api_key(),
-                    dados=st.session_state["dados_chat"],
-                    historico=st.session_state["chat_historico"],
-                    mensagem=pergunta,
-                )
-            )
+            _box = st.empty()
+            resposta = ""
+            for _chunk in stream_chat(
+                api_key=_api_key(),
+                dados=st.session_state["dados_chat"],
+                historico=st.session_state["chat_historico"],
+                mensagem=pergunta,
+            ):
+                resposta += _chunk
+                _box.markdown(resposta.replace("R$", "R\\$"))
 
         st.session_state["chat_historico"].append({"role": "user", "content": pergunta})
         st.session_state["chat_historico"].append({
@@ -479,6 +663,8 @@ if st.session_state["resumo_gerado"] and st.session_state["resumos"]:
             "content": resposta,
             "chart_type": tipo_grafico,
             "periodo_hint": periodo_hint,
+            "categoria_filtro": categoria_filtro,
+            "orientacao": orientacao,
         })
         st.rerun()
 
