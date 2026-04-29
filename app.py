@@ -10,7 +10,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from config import settings
-from core.claude import gerar_resumo, stream_chat, classificar_grafico
+from core.claude import gerar_resumo, stream_chat, classificar_grafico, strip_code_blocks
 from core.extractor import extrair_texto
 from core.formatters import brl
 from core.models import ResumoFinanceiro
@@ -656,6 +656,8 @@ if st.session_state["resumo_gerado"] and st.session_state["resumos"]:
             ):
                 resposta += _chunk
                 _box.markdown(resposta.replace("R$", "R\\$"))
+            resposta = strip_code_blocks(resposta)
+            _box.markdown(resposta.replace("R$", "R\\$"))
 
         st.session_state["chat_historico"].append({"role": "user", "content": pergunta})
         st.session_state["chat_historico"].append({

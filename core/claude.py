@@ -102,6 +102,17 @@ def classificar_grafico(api_key: str, mensagem: str) -> dict:
         return {"tipo": None, "categoria": None, "periodo": None, "orientacao": None}
 
 
+def strip_code_blocks(text: str) -> str:
+    """Remove blocos de código/JSON que a IA pode gerar indevidamente."""
+    # Remove blocos markdown ```...```
+    text = re.sub(r"```[\s\S]*?```", "", text, flags=re.MULTILINE)
+    # Remove objetos/arrays JSON standalone (linhas que começam com { ou [)
+    text = re.sub(r"(?m)^\s*[\{\[][\s\S]*?[\}\]]\s*$", "", text)
+    # Colapsa linhas em branco extras
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def stream_chat(api_key: str, dados: str, historico: list[dict], mensagem: str):
     client = anthropic.Anthropic(api_key=api_key)
     system = _load_prompt("chat.txt").format(dados=dados)
