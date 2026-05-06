@@ -56,6 +56,8 @@ def _get_spark(timeout_s: int = 10):
     return _spark
 
 
+_ERROS_SESSAO_OBSOLETA = ("SESSION_CHANGED", "NO_ACTIVE_SESSION", "INVALID_SESSION", "SESSION_NOT_FOUND")
+
 def _spark_sql(query: str):
     """Executa apenas SELECT no Spark. Reconecta automaticamente se a sessão ficar obsoleta."""
     normalized = query.strip().lstrip("(").lstrip().upper()
@@ -67,7 +69,8 @@ def _spark_sql(query: str):
         try:
             return _get_spark().sql(query)
         except Exception as e:
-            if "SESSION_CHANGED" in str(e) and attempt == 0:
+            msg = str(e).upper()
+            if attempt == 0 and any(k in msg for k in _ERROS_SESSAO_OBSOLETA):
                 _spark = None
                 continue
             raise
