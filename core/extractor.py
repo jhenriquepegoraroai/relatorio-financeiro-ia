@@ -127,22 +127,40 @@ def listar_referencias() -> list[int]:
 
 
 @st.cache_data(ttl=1800)
-def extrair_de_databricks(referencia: int, n_meses: int = 2) -> str:
+def extrair_de_databricks(
+    referencia: int,
+    n_meses: int = 2,
+    periodos_fixos: tuple[str, ...] | None = None,
+) -> str:
     cat = settings.databricks_catalog
     sch = settings.databricks_schema
 
-    # Passo 1: N períodos mais recentes do balancete
-    # Mes_Referencia está em formato MM/yyyy — ordena por ano e mês para garantir ordem cronológica
-    periodos_df = _spark_sql(f"""
-        SELECT DISTINCT Mes_Referencia
-        FROM {cat}.{sch}.balancete_consolidado
-        WHERE Referencia = {referencia}
-        ORDER BY
-            CAST(split(Mes_Referencia, '/')[1] AS INT) DESC,
-            CAST(split(Mes_Referencia, '/')[0] AS INT) DESC
-        LIMIT {n_meses}
-    """).collect()
-    periodos = [row[0] for row in periodos_df]
+    if periodos_fixos:
+        # Valida quais períodos existem de fato na tabela para o condomínio
+        lista = ", ".join(f"'{p}'" for p in periodos_fixos)
+        periodos_df = _spark_sql(f"""
+            SELECT DISTINCT Mes_Referencia
+            FROM {cat}.{sch}.balancete_consolidado
+            WHERE Referencia = {referencia}
+              AND Mes_Referencia IN ({lista})
+            ORDER BY
+                CAST(split(Mes_Referencia, '/')[1] AS INT) ASC,
+                CAST(split(Mes_Referencia, '/')[0] AS INT) ASC
+        """).collect()
+        periodos = [row[0] for row in periodos_df]
+    else:
+        # N períodos mais recentes do balancete
+        # Mes_Referencia está em formato MM/yyyy — ordena por ano e mês para garantir ordem cronológica
+        periodos_df = _spark_sql(f"""
+            SELECT DISTINCT Mes_Referencia
+            FROM {cat}.{sch}.balancete_consolidado
+            WHERE Referencia = {referencia}
+            ORDER BY
+                CAST(split(Mes_Referencia, '/')[1] AS INT) DESC,
+                CAST(split(Mes_Referencia, '/')[0] AS INT) DESC
+            LIMIT {n_meses}
+        """).collect()
+        periodos = [row[0] for row in periodos_df]
 
     if not periodos:
         return ""

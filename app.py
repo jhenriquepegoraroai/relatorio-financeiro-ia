@@ -435,7 +435,7 @@ def _exibir_previsao_caixa(periodos: list[ResumoFinanceiro]) -> None:
         plot_bgcolor="white", paper_bgcolor="white",
         font=dict(family="Inter, sans-serif", size=12),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key="previsao_caixa_chart")
 
     # Tabela resumo da projeção
     linhas = ""
@@ -615,6 +615,53 @@ def _detectar_n_meses_pedido(mensagem: str) -> int | None:
     if re.search(r'\b(3|tr[eê]s)\s*m[eê]s|\btrimestre\b', m):
         return 3
     return None
+
+
+_MES_NOME_NUM: dict[str, int] = {
+    "jan": 1, "janeiro": 1,
+    "fev": 2, "fevereiro": 2,
+    "mar": 3, "marco": 3,
+    "abr": 4, "abril": 4,
+    "mai": 5, "maio": 5,
+    "jun": 6, "junho": 6,
+    "jul": 7, "julho": 7,
+    "ago": 8, "agosto": 8,
+    "set": 9, "setembro": 9,
+    "out": 10, "outubro": 10,
+    "nov": 11, "novembro": 11,
+    "dez": 12, "dezembro": 12,
+}
+
+def _detectar_periodo_explicito(mensagem: str) -> tuple[str, ...] | None:
+    """Detecta 'de <mês> a <mês> de <ano>' e retorna períodos MM/yyyy.
+
+    Exemplos reconhecidos:
+      'de outubro a dezembro de 2025' → ('10/2025', '11/2025', '12/2025')
+      'entre jan e mar 2025'          → ('01/2025', '02/2025', '03/2025')
+      'outubro até dezembro 2025'     → ('10/2025', '11/2025', '12/2025')
+    """
+    import unicodedata
+
+    def _norm(s: str) -> str:
+        return unicodedata.normalize("NFD", s.lower()).encode("ascii", "ignore").decode()
+
+    m = _norm(mensagem)
+    nomes = "|".join(sorted(_MES_NOME_NUM.keys(), key=len, reverse=True))
+    pat = (
+        rf'(?:de\s+|entre\s+)?({nomes})'
+        rf'\s+(?:ao?|e|ate|a)\s+'
+        rf'({nomes})'
+        rf'(?:\s+de)?\s+(\d{{4}})'
+    )
+    match = re.search(pat, m)
+    if not match:
+        return None
+    mes_ini = _MES_NOME_NUM.get(match.group(1))
+    mes_fim = _MES_NOME_NUM.get(match.group(2))
+    ano = int(match.group(3))
+    if not mes_ini or not mes_fim or mes_ini > mes_fim:
+        return None
+    return tuple(f"{mes:02d}/{ano}" for mes in range(mes_ini, mes_fim + 1))
 
 
 def _grafico_por_tipo(
@@ -1049,7 +1096,7 @@ if st.session_state["resumo_gerado"] and st.session_state["resumos"]:
     st.subheader("Chat com os Relatórios")
     _chips_sugestao(len(st.session_state["resumos"]))
 
-    for msg in st.session_state["chat_historico"]:
+    for i, msg in enumerate(st.session_state["chat_historico"]):
         with st.chat_message(msg["role"]):
             if msg.get("chart_type") and st.session_state["resumos_chat"]:
                 st.plotly_chart(
@@ -1061,6 +1108,7 @@ if st.session_state["resumo_gerado"] and st.session_state["resumos"]:
                         msg.get("orientacao"),
                     ),
                     use_container_width=True,
+                    key=f"chart_hist_{i}",
                 )
             if msg.get("content"):
                 st.markdown(msg["content"])
@@ -1072,22 +1120,33 @@ if st.session_state["resumo_gerado"] and st.session_state["resumos"]:
         "Pergunte sobre os relatórios financeiros…"
     )
     if pergunta:
-        # Re-fetch se o usuário pede mais meses e Databricks está configurado.
+        # Re-fetch se o usuário pede mais meses ou período explícito e Databricks está configurado.
         # Atualiza apenas o contexto do chat (dados_chat); o quadro do resumo
         # executivo (resumos) permanece fixo com os 2 meses iniciais.
         n_pedido = _detectar_n_meses_pedido(pergunta)
+        periodos_exp = _detectar_periodo_explicito(pergunta)
         ref = st.session_state.get("referencia_atual")
-        if n_pedido and ref and n_pedido > st.session_state.get("n_meses_carregados", 0):
-            with st.spinner(f"Buscando {n_pedido} meses no Databricks…"):
+        precisa_refetch = ref and (
+            periodos_exp
+            or (n_pedido and n_pedido > st.session_state.get("n_meses_carregados", 0))
+        )
+        if precisa_refetch:
+            with st.spinner("Buscando dados no Databricks…"):
                 try:
-                    texto = extrair_de_databricks(ref, n_meses=n_pedido)
+                    if periodos_exp:
+                        texto = extrair_de_databricks(ref, periodos_fixos=periodos_exp)
+                        label = f"{periodos_exp[0]} a {periodos_exp[-1]}" if len(periodos_exp) > 1 else periodos_exp[0]
+                        msg_ctx = f"📊 Contexto do chat atualizado com o período **{label}**."
+                    else:
+                        texto = extrair_de_databricks(ref, n_meses=n_pedido)
+                        st.session_state["n_meses_carregados"] = n_pedido
+                        msg_ctx = f"📊 Contexto do chat atualizado com **{n_pedido} meses**. O resumo executivo continua exibindo os 2 meses fixos."
                     resumos_chat = gerar_resumo(_api_key(), texto)
-                    st.session_state["resumos_chat"]      = resumos_chat
-                    st.session_state["dados_chat"]        = _resumos_para_chat(resumos_chat)
-                    st.session_state["n_meses_carregados"] = n_pedido
+                    st.session_state["resumos_chat"] = resumos_chat
+                    st.session_state["dados_chat"]   = _resumos_para_chat(resumos_chat)
                     st.session_state["chat_historico"].append({
                         "role": "assistant",
-                        "content": f"📊 Contexto do chat atualizado com **{n_pedido} meses**. O resumo executivo continua exibindo os 2 meses fixos.",
+                        "content": msg_ctx,
                     })
                 except Exception as e:
                     st.warning(f"Não foi possível buscar mais dados: {e}")
@@ -1103,6 +1162,7 @@ if st.session_state["resumo_gerado"] and st.session_state["resumos"]:
                 st.plotly_chart(
                     _grafico_por_tipo(tipo_grafico, st.session_state["resumos_chat"], periodo_hint, categoria_filtro, orientacao),
                     use_container_width=True,
+                    key=f"chart_hist_{len(st.session_state['chat_historico'])}",
                 )
             _box = st.empty()
             _status_box = st.empty()
