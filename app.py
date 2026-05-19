@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 from config import settings
 from core.claude import gerar_resumo, stream_chat, classificar_grafico, strip_code_blocks
 from core.db_log import registrar_log, listar_logs
-from core.cost import calcular_custo_usd, custo_brl, USD_TO_BRL
+from core.cost import calcular_custo_usd, custo_brl, USD_TO_BRL, comparar_provedores
 from core.extractor import (
     extrair_texto, extrair_de_databricks, extrair_balancete_compacto,
     listar_referencias, _databricks_configurado, descrever_colunas_balancete,
@@ -947,8 +947,9 @@ with st.sidebar:
     _su = st.session_state.setdefault("session_usage", {
         "input_tokens": 0, "output_tokens": 0,
         "cache_creation_tokens": 0, "cache_read_tokens": 0,
-        "cost_usd": 0.0, "n_calls": 0,
+        "cost_usd": 0.0, "n_calls": 0, "by_model": {},
     })
+    _su.setdefault("by_model", {})
     _cost_brl = custo_brl(_su["cost_usd"])
     st.markdown("**Custo da Sessão**")
     _c1, _c2, _c3 = st.columns(3)
@@ -964,6 +965,40 @@ with st.sidebar:
         f"Output: {_su['output_tokens']:,} tok · "
         f"Cache: {_su['cache_read_tokens']:,} tok ({_cache_pct}%)"
     )
+
+    # ── Comparativo de provedores ─────────────────────────────────────────────
+    _linhas = comparar_provedores(_su.get("by_model", {})) if _su["n_calls"] > 0 else []
+    with st.expander("💰 Comparativo de Provedores", expanded=False):
+        if not _linhas:
+            st.caption("Nenhuma chamada na sessão ainda.")
+        else:
+            _total_a = sum(r["custo_anthropic"] for r in _linhas)
+            _total_o = sum(r["custo_openai"]    for r in _linhas)
+            _total_g = sum(r["custo_gemini"]    for r in _linhas)
+
+            def _delta(alt, base):
+                if base == 0:
+                    return "—"
+                pct = (alt - base) / base * 100
+                sinal = "+" if pct > 0 else ""
+                return f"{sinal}{pct:.0f}%"
+
+            # Tabela por uso (Extração / Chat)
+            for r in _linhas:
+                st.markdown(f"**{r['uso']}**")
+                _ca, _co, _cg = st.columns(3)
+                _ca.metric("Anthropic",    f"${r['custo_anthropic']:.4f}", r['modelo_anthropic'], delta_color="off")
+                _co.metric("OpenAI",       f"${r['custo_openai']:.4f}",    r['modelo_openai'],    delta_color="off")
+                _cg.metric("Google",       f"${r['custo_gemini']:.4f}",    r['modelo_gemini'],    delta_color="off")
+
+            st.divider()
+            # Linha de totais com deltas
+            _ta, _to, _tg = st.columns(3)
+            _ta.metric("Total Anthropic", f"${_total_a:.4f}", "atual",              delta_color="off")
+            _to.metric("Total OpenAI",    f"${_total_o:.4f}", _delta(_total_o, _total_a))
+            _tg.metric("Total Google",    f"${_total_g:.4f}", _delta(_total_g, _total_a))
+            st.caption("⚠️ Estimativa: mesmos tokens, modelos equivalentes. "
+                       "Cache do Gemini exclui custo de armazenamento/hora.")
 
     st.divider()
     with st.expander("📋 Histórico de Interações", expanded=False):
@@ -996,7 +1031,7 @@ for k, v in [
     ("n_meses_carregados", 2),
     ("session_usage", {"input_tokens": 0, "output_tokens": 0,
                        "cache_creation_tokens": 0, "cache_read_tokens": 0,
-                       "cost_usd": 0.0, "n_calls": 0}),
+                       "cost_usd": 0.0, "n_calls": 0, "by_model": {}}),
     ("session_start", None),
     ("periodos_chat", None),
 ]:
@@ -1046,6 +1081,15 @@ def _accumulate_usage(usage: dict, model: str) -> None:
         usage.get("cache_read_tokens", 0),
     )
     su["n_calls"] += 1
+    # Acumula por modelo para o comparativo de provedores
+    bm = su.setdefault("by_model", {}).setdefault(model, {
+        "input_tokens": 0, "output_tokens": 0,
+        "cache_creation_tokens": 0, "cache_read_tokens": 0,
+    })
+    bm["input_tokens"]          += usage.get("input_tokens", 0)
+    bm["output_tokens"]         += usage.get("output_tokens", 0)
+    bm["cache_creation_tokens"] += usage.get("cache_creation_tokens", 0)
+    bm["cache_read_tokens"]     += usage.get("cache_read_tokens", 0)
 
 # ─── Ação: gerar ──────────────────────────────────────────────────────────────
 

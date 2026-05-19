@@ -110,7 +110,7 @@ def classificar_grafico(api_key: str, mensagem: str, usage_out: dict | None = No
     response = _with_rate_limit_retry(lambda: client.messages.create(
         model=settings.claude_model_chat,
         max_tokens=80,
-        system=_SYSTEM_CLASSIFICAR,
+        system=[{"type": "text", "text": _SYSTEM_CLASSIFICAR, "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user", "content": mensagem}],
     ))
     _acumular_usage(usage_out, response.usage)
@@ -154,15 +154,26 @@ def stream_chat(
     periodos: str = "",
 ):
     client = anthropic.Anthropic(api_key=api_key)
-    system = _load_prompt("chat.txt").format(dados=dados, nome=nome, periodos=periodos)
+
+    # Bloco 1: instruções estáticas — sem variáveis, cache hit entre TODAS as sessões
+    instrucoes = _load_prompt("chat_instrucoes.txt")
+    # Bloco 2: contexto do condomínio + dados — cache hit dentro da mesma sessão (5 min)
+    contexto = (
+        f"Você atende o {nome}.\n"
+        f"Períodos disponíveis: {periodos}\n\n"
+        f"<dados_financeiros>\n{dados}\n</dados_financeiros>"
+    )
+    system = [
+        {"type": "text", "text": instrucoes, "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": contexto,   "cache_control": {"type": "ephemeral"}},
+    ]
 
     historico_msgs = [
         {"role": m["role"], "content": m["content"]}
         for m in historico
         if m.get("content")
     ]
-    # Adiciona cache_control na última mensagem do histórico para que os turnos
-    # anteriores da conversa sejam cacheados e não consumam tokens na próxima requisição.
+    # Cache na última mensagem do histórico para reaproveitar turnos anteriores
     if historico_msgs:
         last = historico_msgs[-1]
         historico_msgs[-1] = {
@@ -175,7 +186,7 @@ def stream_chat(
     with client.messages.stream(
         model=settings.claude_model_chat,
         max_tokens=settings.max_tokens_chat,
-        system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+        system=system,
         messages=mensagens,
     ) as stream:
         for text in stream.text_stream:
