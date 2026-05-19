@@ -12,9 +12,10 @@ import plotly.graph_objects as go
 from config import settings
 from core.claude import gerar_resumo, stream_chat, classificar_grafico, strip_code_blocks
 from core.db_log import registrar_log, listar_logs
+from core.cost import calcular_custo_usd, custo_brl, USD_TO_BRL
 from core.extractor import (
-    extrair_texto, extrair_de_databricks, listar_referencias,
-    _databricks_configurado, descrever_colunas_balancete,
+    extrair_texto, extrair_de_databricks, extrair_balancete_compacto,
+    listar_referencias, _databricks_configurado, descrever_colunas_balancete,
     aguardar_cluster, _is_erro_transiente,
     get_recent_sql, clear_recent_sql,
 )
@@ -584,13 +585,13 @@ def _extrair_periodo_da_mensagem(m: str) -> str | None:
             return mes
     return None
 
-def _detectar_tipo_grafico(msg: str, api_key: str) -> tuple[str | None, str | None, str | None, str | None]:
+def _detectar_tipo_grafico(msg: str, api_key: str, usage_out: dict | None = None) -> tuple[str | None, str | None, str | None, str | None]:
     """Pré-filtra por keywords e delega ao Claude para entender o contexto.
     Retorna (tipo, periodo_hint, categoria_filtro, orientacao)."""
     m = msg.lower()
     if not any(k in m for k in _CHART_KEYWORDS):
         return None, None, None, None
-    resultado = classificar_grafico(api_key, msg)
+    resultado = classificar_grafico(api_key, msg, usage_out=usage_out)
     tipo = resultado.get("tipo")
     if tipo is None:
         return None, None, None, None
@@ -941,17 +942,45 @@ with st.sidebar:
     gerar = st.button("Gerar Resumo Executivo", type="primary", use_container_width=True)
 
     st.divider()
+
+    # ── Custo da sessão ──────────────────────────────────────────────────────
+    _su = st.session_state.setdefault("session_usage", {
+        "input_tokens": 0, "output_tokens": 0,
+        "cache_creation_tokens": 0, "cache_read_tokens": 0,
+        "cost_usd": 0.0, "n_calls": 0,
+    })
+    _cost_brl = custo_brl(_su["cost_usd"])
+    st.markdown("**Custo da Sessão**")
+    _c1, _c2, _c3 = st.columns(3)
+    _c1.metric("USD", f"$ {_su['cost_usd']:.4f}")
+    _c2.metric("BRL", f"R$ {_cost_brl:.4f}")
+    _c3.metric("Chamadas", _su["n_calls"])
+    _cache_pct = (
+        round(_su["cache_read_tokens"] / max(_su["input_tokens"] + _su["cache_read_tokens"], 1) * 100)
+        if _su["n_calls"] > 0 else 0
+    )
+    st.caption(
+        f"Input: {_su['input_tokens']:,} tok · "
+        f"Output: {_su['output_tokens']:,} tok · "
+        f"Cache: {_su['cache_read_tokens']:,} tok ({_cache_pct}%)"
+    )
+
+    st.divider()
     with st.expander("📋 Histórico de Interações", expanded=False):
         import pandas as _pd
-        _logs = listar_logs(limit=100)
+        _logs = listar_logs(limit=500)
+        _session_start = st.session_state.get("session_start")
+        if _logs and _session_start:
+            _logs = [r for r in _logs if r["timestamp"] >= _session_start]
         if _logs:
             _df_logs = _pd.DataFrame(_logs)[
                 ["timestamp", "referencia", "pergunta", "resposta",
-                 "modelo", "input_tokens", "output_tokens", "sql_usado"]
+                 "modelo", "input_tokens", "output_tokens",
+                 "cache_creation_tokens", "cache_read_tokens", "sql_usado"]
             ]
             st.dataframe(_df_logs, use_container_width=True)
         else:
-            st.info("Nenhuma interação registrada ainda.")
+            st.info("Nenhuma interação nesta sessão ainda.")
 
 
 # ─── Estado da sessão ─────────────────────────────────────────────────────────
@@ -965,9 +994,58 @@ for k, v in [
     ("sugestao_pendente", None),
     ("referencia_atual", None),
     ("n_meses_carregados", 2),
+    ("session_usage", {"input_tokens": 0, "output_tokens": 0,
+                       "cache_creation_tokens": 0, "cache_read_tokens": 0,
+                       "cost_usd": 0.0, "n_calls": 0}),
+    ("session_start", None),
+    ("periodos_chat", None),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
+
+
+def _preparar_historico(dados: str, historico: list[dict]) -> list[dict]:
+    """Retorna histórico trimado para garantir que o contexto total caiba em 180k tokens.
+
+    Estimativa: 1 token ≈ 4 chars. Reservamos 180k tokens para dados + histórico,
+    deixando 20k para a resposta e overhead do system prompt.
+    Remove os pares de mensagens mais antigas até caber.
+    """
+    _LIMITE_CHARS = 180_000 * 4  # 180k tokens × 4 chars/token
+    _OVERHEAD_SYSTEM = 2_000 * 4  # ~2k tokens para o template do system prompt
+
+    disponivel = _LIMITE_CHARS - len(dados) - _OVERHEAD_SYSTEM
+    if disponivel <= 0:
+        return []  # dados sozinhos já tomam tudo — histórico zerado
+
+    trimado = [m for m in historico if m.get("content")]
+    while trimado:
+        tamanho = sum(len(str(m["content"])) for m in trimado)
+        if tamanho <= disponivel:
+            break
+        # Remove o par mais antigo (user + assistant)
+        trimado = trimado[2:]
+
+    return trimado
+
+
+def _accumulate_usage(usage: dict, model: str) -> None:
+    from datetime import datetime, timezone
+    su = st.session_state["session_usage"]
+    if st.session_state["session_start"] is None:
+        st.session_state["session_start"] = datetime.now(timezone.utc).isoformat()
+    su["input_tokens"]          += usage.get("input_tokens", 0)
+    su["output_tokens"]         += usage.get("output_tokens", 0)
+    su["cache_creation_tokens"] += usage.get("cache_creation_tokens", 0)
+    su["cache_read_tokens"]     += usage.get("cache_read_tokens", 0)
+    su["cost_usd"] += calcular_custo_usd(
+        model,
+        usage.get("input_tokens", 0),
+        usage.get("output_tokens", 0),
+        usage.get("cache_creation_tokens", 0),
+        usage.get("cache_read_tokens", 0),
+    )
+    su["n_calls"] += 1
 
 # ─── Ação: gerar ──────────────────────────────────────────────────────────────
 
@@ -1038,7 +1116,23 @@ if gerar:
                     else:
                         raise
                 progress.progress(0.7, text="Analisando documentos…")
-                resumos = gerar_resumo(_api_key(), texto)
+                _resumo_usage: dict = {}
+                resumos = gerar_resumo(_api_key(), texto, usage_out=_resumo_usage)
+                _accumulate_usage(_resumo_usage, settings.claude_model)
+                try:
+                    registrar_log(
+                        referencia=ref_selecionada,
+                        pergunta="[RESUMO EXECUTIVO]",
+                        resposta=", ".join(r.periodo for r in resumos),
+                        modelo=settings.claude_model,
+                        input_tokens=_resumo_usage.get("input_tokens", 0),
+                        output_tokens=_resumo_usage.get("output_tokens", 0),
+                        sql_usado="\n---\n".join(get_recent_sql()),
+                        cache_creation_tokens=_resumo_usage.get("cache_creation_tokens", 0),
+                        cache_read_tokens=_resumo_usage.get("cache_read_tokens", 0),
+                    )
+                except Exception:
+                    pass
             except Exception as e:
                 erros.append(str(e))
             progress.empty()
@@ -1062,7 +1156,23 @@ if gerar:
                 secoes_resumo.append(f"=== {arq.name} ===\n{texto}")
             progress.progress(len(arquivos) / (len(arquivos) + 1), text="Analisando documentos…")
             try:
-                resumos = gerar_resumo(_api_key(), "\n\n".join(secoes_resumo))
+                _resumo_usage: dict = {}
+                resumos = gerar_resumo(_api_key(), "\n\n".join(secoes_resumo), usage_out=_resumo_usage)
+                _accumulate_usage(_resumo_usage, settings.claude_model)
+                try:
+                    registrar_log(
+                        referencia=", ".join(a.name for a in arquivos),
+                        pergunta="[RESUMO EXECUTIVO]",
+                        resposta=", ".join(r.periodo for r in resumos),
+                        modelo=settings.claude_model,
+                        input_tokens=_resumo_usage.get("input_tokens", 0),
+                        output_tokens=_resumo_usage.get("output_tokens", 0),
+                        sql_usado="",
+                        cache_creation_tokens=_resumo_usage.get("cache_creation_tokens", 0),
+                        cache_read_tokens=_resumo_usage.get("cache_read_tokens", 0),
+                    )
+                except Exception:
+                    pass
             except ValueError as e:
                 erros.append(str(e))
             progress.empty()
@@ -1081,6 +1191,8 @@ if gerar:
         st.session_state["chat_historico"]    = []
         st.session_state["sugestao_pendente"] = None
         st.session_state["resumo_gerado"]     = True
+        st.session_state["periodos_chat"]     = None
+        st.rerun()
 
 # ─── Exibição ─────────────────────────────────────────────────────────────────
 
@@ -1088,9 +1200,6 @@ if st.session_state["resumo_gerado"] and st.session_state["resumos"]:
     st.divider()
     exibir_relatorio(st.session_state["resumos"])
 
-    st.divider()
-    with st.expander("🔮 Previsão de Caixa — Próximos 3 Meses", expanded=True):
-        _exibir_previsao_caixa(st.session_state["resumos"])
 
     st.divider()
     st.subheader("Chat com os Relatórios")
@@ -1134,16 +1243,17 @@ if st.session_state["resumo_gerado"] and st.session_state["resumos"]:
             with st.spinner("Buscando dados no Databricks…"):
                 try:
                     if periodos_exp:
-                        texto = extrair_de_databricks(ref, periodos_fixos=periodos_exp)
+                        texto = extrair_balancete_compacto(ref, periodos_fixos=periodos_exp)
                         label = f"{periodos_exp[0]} a {periodos_exp[-1]}" if len(periodos_exp) > 1 else periodos_exp[0]
                         msg_ctx = f"📊 Contexto do chat atualizado com o período **{label}**."
+                        st.session_state["periodos_chat"] = label
                     else:
-                        texto = extrair_de_databricks(ref, n_meses=n_pedido)
+                        texto = extrair_balancete_compacto(ref, n_meses=n_pedido)
                         st.session_state["n_meses_carregados"] = n_pedido
-                        msg_ctx = f"📊 Contexto do chat atualizado com **{n_pedido} meses**. O resumo executivo continua exibindo os 2 meses fixos."
-                    resumos_chat = gerar_resumo(_api_key(), texto)
-                    st.session_state["resumos_chat"] = resumos_chat
-                    st.session_state["dados_chat"]   = _resumos_para_chat(resumos_chat)
+                        msg_ctx = f"📊 Contexto do chat atualizado com **{n_pedido} meses**."
+                        _periodos_raw = re.findall(r'\[(\d{2}/\d{4})\]', texto)
+                        st.session_state["periodos_chat"] = ", ".join(sorted(set(_periodos_raw))) or f"últimos {n_pedido} meses"
+                    st.session_state["dados_chat"] = texto
                     st.session_state["chat_historico"].append({
                         "role": "assistant",
                         "content": msg_ctx,
@@ -1151,7 +1261,10 @@ if st.session_state["resumo_gerado"] and st.session_state["resumos"]:
                 except Exception as e:
                     st.warning(f"Não foi possível buscar mais dados: {e}")
 
-        tipo_grafico, periodo_hint, categoria_filtro, orientacao = _detectar_tipo_grafico(pergunta, _api_key())
+        _grafico_usage: dict = {}
+        tipo_grafico, periodo_hint, categoria_filtro, orientacao = _detectar_tipo_grafico(pergunta, _api_key(), usage_out=_grafico_usage)
+        if _grafico_usage:
+            _accumulate_usage(_grafico_usage, settings.claude_model_chat)
         components.html(_SCROLL_JS, height=0)
 
         with st.chat_message("user"):
@@ -1173,14 +1286,18 @@ if st.session_state["resumo_gerado"] and st.session_state["resumos"]:
             import time as _time
             _resumos_c = st.session_state.get("resumos_chat") or []
             _nome_cond = _resumos_c[-1].condominio if _resumos_c else "Condomínio"
-            _periodos_c = ", ".join(r.periodo for r in _resumos_c)
+            _periodos_c = st.session_state.get("periodos_chat") or ", ".join(r.periodo for r in _resumos_c)
+
+            _dados_chat = st.session_state["dados_chat"]
+            _historico_chat = _preparar_historico(_dados_chat, st.session_state["chat_historico"])
+
             _rate_waits = [60, 120]
             for _attempt in range(len(_rate_waits) + 1):
                 try:
                     for _chunk in stream_chat(
                         api_key=_api_key(),
-                        dados=st.session_state["dados_chat"],
-                        historico=st.session_state["chat_historico"],
+                        dados=_dados_chat,
+                        historico=_historico_chat,
                         mensagem=pergunta,
                         usage_out=_usage,
                         nome=_nome_cond,
@@ -1197,14 +1314,25 @@ if st.session_state["resumo_gerado"] and st.session_state["resumos"]:
                         _w = _rate_waits[_attempt]
                         resposta = ""
                         _box.empty()
-                        _status_box.warning(f"⏳ Limite de tokens atingido. Aguardando {_w}s antes de tentar novamente…")
+                        _status_box.warning(f"⏳ Limite de taxa atingido. Aguardando {_w}s…")
                         _time.sleep(_w)
                         _status_box.empty()
                     else:
-                        _status_box.error("Limite de tokens atingido após várias tentativas. Aguarde alguns minutos e tente novamente.")
+                        _status_box.error("Limite de taxa atingido após várias tentativas. Aguarde alguns minutos.")
                         resposta = ""
                         break
+                except _ant.BadRequestError:
+                    # Último recurso: zera histórico e tenta de novo com contexto limpo
+                    if _attempt == 0:
+                        st.session_state["chat_historico"] = []
+                        _historico_chat = []
+                        continue
+                    _status_box.error("Não foi possível processar. Tente recarregar a página.")
+                    resposta = ""
+                    break
 
+        if _usage:
+            _accumulate_usage(_usage, settings.claude_model_chat)
         try:
             registrar_log(
                 referencia=str(st.session_state.get("referencia_atual") or "arquivo"),
@@ -1214,6 +1342,8 @@ if st.session_state["resumo_gerado"] and st.session_state["resumos"]:
                 input_tokens=_usage.get("input_tokens", 0),
                 output_tokens=_usage.get("output_tokens", 0),
                 sql_usado="\n---\n".join(get_recent_sql()),
+                cache_creation_tokens=_usage.get("cache_creation_tokens", 0),
+                cache_read_tokens=_usage.get("cache_read_tokens", 0),
             )
         except Exception:
             pass  # log nunca deve quebrar o fluxo principal

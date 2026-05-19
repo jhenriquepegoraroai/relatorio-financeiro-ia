@@ -27,7 +27,16 @@ def _load_prompt(name: str) -> str:
     return (_PROMPTS_DIR / name).read_text(encoding="utf-8")
 
 
-def gerar_resumo(api_key: str, conteudo: str) -> list[ResumoFinanceiro]:
+def _acumular_usage(usage_out: dict | None, response_usage) -> None:
+    if usage_out is None:
+        return
+    usage_out["input_tokens"] = usage_out.get("input_tokens", 0) + (response_usage.input_tokens or 0)
+    usage_out["output_tokens"] = usage_out.get("output_tokens", 0) + (response_usage.output_tokens or 0)
+    usage_out["cache_creation_tokens"] = usage_out.get("cache_creation_tokens", 0) + (getattr(response_usage, "cache_creation_input_tokens", 0) or 0)
+    usage_out["cache_read_tokens"] = usage_out.get("cache_read_tokens", 0) + (getattr(response_usage, "cache_read_input_tokens", 0) or 0)
+
+
+def gerar_resumo(api_key: str, conteudo: str, usage_out: dict | None = None) -> list[ResumoFinanceiro]:
     client = anthropic.Anthropic(api_key=api_key)
     system = _load_prompt("resumo.txt")
 
@@ -40,6 +49,7 @@ def gerar_resumo(api_key: str, conteudo: str) -> list[ResumoFinanceiro]:
                 {"type": "text", "text": conteudo, "cache_control": {"type": "ephemeral"}}
             ]}],
         ))
+        _acumular_usage(usage_out, response.usage)
         if response.stop_reason == "max_tokens":
             raise ValueError(
                 "O relatório é muito extenso: o limite de tokens foi atingido antes de "
@@ -94,7 +104,7 @@ REGRAS DE CLASSIFICAÇÃO:
 Responda SOMENTE com o JSON, sem explicações.
 """
 
-def classificar_grafico(api_key: str, mensagem: str) -> dict:
+def classificar_grafico(api_key: str, mensagem: str, usage_out: dict | None = None) -> dict:
     """Retorna {"tipo": str|None, "categoria": str|None, "periodo": str|None, "orientacao": str|None}."""
     client = anthropic.Anthropic(api_key=api_key)
     response = _with_rate_limit_retry(lambda: client.messages.create(
@@ -103,6 +113,7 @@ def classificar_grafico(api_key: str, mensagem: str) -> dict:
         system=_SYSTEM_CLASSIFICAR,
         messages=[{"role": "user", "content": mensagem}],
     ))
+    _acumular_usage(usage_out, response.usage)
     texto = response.content[0].text.strip()
     texto = re.sub(r"^```[a-z]*\n?", "", texto)
     texto = re.sub(r"\n?```$", "", texto)
@@ -171,5 +182,4 @@ def stream_chat(
             yield text
         if usage_out is not None:
             msg = stream.get_final_message()
-            usage_out["input_tokens"] = msg.usage.input_tokens
-            usage_out["output_tokens"] = msg.usage.output_tokens
+            _acumular_usage(usage_out, msg.usage)

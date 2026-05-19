@@ -6,29 +6,35 @@ _DB_PATH = Path(__file__).parent.parent / "logs" / "interacoes.db"
 
 _CREATE_SQL = """
 CREATE TABLE IF NOT EXISTS interacoes (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp     TEXT    NOT NULL,
-    referencia    TEXT    NOT NULL,
-    pergunta      TEXT    NOT NULL,
-    resposta      TEXT    NOT NULL,
-    modelo        TEXT    NOT NULL DEFAULT '',
-    input_tokens  INTEGER NOT NULL DEFAULT 0,
-    output_tokens INTEGER NOT NULL DEFAULT 0,
-    sql_usado     TEXT    NOT NULL DEFAULT ''
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp              TEXT    NOT NULL,
+    referencia             TEXT    NOT NULL,
+    pergunta               TEXT    NOT NULL,
+    resposta               TEXT    NOT NULL,
+    modelo                 TEXT    NOT NULL DEFAULT '',
+    input_tokens           INTEGER NOT NULL DEFAULT 0,
+    output_tokens          INTEGER NOT NULL DEFAULT 0,
+    cache_creation_tokens  INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens      INTEGER NOT NULL DEFAULT 0,
+    sql_usado              TEXT    NOT NULL DEFAULT ''
 )
 """
 
-_MIGRATE_SQL = "ALTER TABLE interacoes ADD COLUMN modelo TEXT NOT NULL DEFAULT ''"
+_MIGRATIONS = [
+    ("modelo",                "ALTER TABLE interacoes ADD COLUMN modelo TEXT NOT NULL DEFAULT ''"),
+    ("cache_creation_tokens", "ALTER TABLE interacoes ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0"),
+    ("cache_read_tokens",     "ALTER TABLE interacoes ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0"),
+]
 
 
 def init_db() -> None:
     _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(_DB_PATH) as conn:
         conn.execute(_CREATE_SQL)
-        # migração: adiciona coluna se o banco já existia sem ela
         cols = {row[1] for row in conn.execute("PRAGMA table_info(interacoes)")}
-        if "modelo" not in cols:
-            conn.execute(_MIGRATE_SQL)
+        for col, sql in _MIGRATIONS:
+            if col not in cols:
+                conn.execute(sql)
 
 
 def registrar_log(
@@ -39,20 +45,25 @@ def registrar_log(
     input_tokens: int,
     output_tokens: int,
     sql_usado: str,
+    cache_creation_tokens: int = 0,
+    cache_read_tokens: int = 0,
 ) -> None:
     init_db()
     ts = datetime.now(timezone.utc).isoformat()
     with sqlite3.connect(_DB_PATH) as conn:
         conn.execute(
             "INSERT INTO interacoes (timestamp, referencia, pergunta, resposta, modelo, "
-            "input_tokens, output_tokens, sql_usado) VALUES (?,?,?,?,?,?,?,?)",
-            (ts, referencia, pergunta, resposta, modelo, input_tokens, output_tokens, sql_usado),
+            "input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, sql_usado) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (ts, referencia, pergunta, resposta, modelo,
+             input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, sql_usado),
         )
 
 
 def listar_logs(limit: int = 100) -> list[dict]:
     if not _DB_PATH.exists():
         return []
+    init_db()
     with sqlite3.connect(_DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(

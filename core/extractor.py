@@ -213,6 +213,82 @@ def extrair_de_databricks(
     return "\n".join(partes).strip()
 
 
+# Limite conservador de chars para o dados_chat antes de enviar ao Claude.
+# 200k tokens ≈ 800k chars; usamos 500k (~125k tokens) para deixar margem
+# para histórico, system prompt e overhead.
+_MAX_DADOS_CHARS = 500_000
+
+
+@st.cache_data(ttl=1800)
+def extrair_balancete_compacto(
+    referencia: int,
+    n_meses: int = 6,
+    periodos_fixos: tuple[str, ...] | None = None,
+) -> str:
+    """Versão compacta para contexto de chat: só balancete, sem conta corrente.
+
+    Usa formato mínimo (categoria|descricao|valor) para economizar tokens.
+    Conta corrente tem lançamentos individuais que explodem o contexto.
+    """
+    cat = settings.databricks_catalog
+    sch = settings.databricks_schema
+
+    if periodos_fixos:
+        lista = ", ".join(f"'{p}'" for p in periodos_fixos)
+        periodos_df = _spark_sql(f"""
+            SELECT DISTINCT Mes_Referencia
+            FROM {cat}.{sch}.balancete_consolidado
+            WHERE Referencia = {referencia}
+              AND Mes_Referencia IN ({lista})
+            ORDER BY
+                CAST(split(Mes_Referencia, '/')[1] AS INT) ASC,
+                CAST(split(Mes_Referencia, '/')[0] AS INT) ASC
+        """).collect()
+    else:
+        periodos_df = _spark_sql(f"""
+            SELECT DISTINCT Mes_Referencia
+            FROM {cat}.{sch}.balancete_consolidado
+            WHERE Referencia = {referencia}
+            ORDER BY
+                CAST(split(Mes_Referencia, '/')[1] AS INT) DESC,
+                CAST(split(Mes_Referencia, '/')[0] AS INT) DESC
+            LIMIT {n_meses}
+        """).collect()
+
+    periodos = [row[0] for row in periodos_df]
+    if not periodos:
+        return ""
+
+    partes = []
+    for periodo in reversed(periodos):
+        bal_rows = _spark_sql(f"""
+            SELECT Categoria_Balancete, Descricao, Valor
+            FROM {cat}.{sch}.balancete_consolidado
+            WHERE Referencia = {referencia}
+              AND Mes_Referencia = '{periodo}'
+            ORDER BY Categoria_Balancete, Descricao
+        """).collect()
+
+        if bal_rows:
+            partes.append(f"[{periodo}]")
+            for r in bal_rows:
+                partes.append(f"{r['Categoria_Balancete']}|{r['Descricao']}|{r['Valor']}")
+
+    texto = "\n".join(partes).strip()
+
+    # Segurança: se ainda assim for grande (muitas categorias), trunca meses mais antigos
+    if len(texto) > _MAX_DADOS_CHARS:
+        linhas = texto.splitlines()
+        while len("\n".join(linhas)) > _MAX_DADOS_CHARS and linhas:
+            # Remove o primeiro bloco de mês (até o próximo cabeçalho '[')
+            linhas.pop(0)
+            while linhas and not linhas[0].startswith("["):
+                linhas.pop(0)
+        texto = "\n".join(linhas)
+
+    return texto
+
+
 def extrair_texto(source) -> str:
     """Dispatcher: detecta o tipo pelo nome/extensão e chama o extrator correto."""
     nome = source if isinstance(source, (str, os.PathLike)) else getattr(source, "name", "")
