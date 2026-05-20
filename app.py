@@ -478,6 +478,14 @@ def _extrair_periodo_da_mensagem(m: str) -> str | None:
             return mes
     return None
 
+_PEDIDO_GRAFICO_GENERICO = re.compile(
+    r"^\s*(eu\s+)?"
+    r"(me\s+mostra\s+|me\s+mostre\s+|mostra\s+|mostre\s+|quero\s+|gera\s+|gere\s+|faz\s+|faça\s+|cria\s+|crie\s+)?"
+    r"(um\s+|uma\s+|o\s+)?gr[áa]fico\s*\.?\s*$",
+    re.IGNORECASE,
+)
+
+
 def _detectar_tipo_grafico(msg: str, api_key: str, usage_out: dict | None = None) -> tuple[str | None, str | None, str | None, str | None]:
     """Pré-filtra por keywords e delega ao Claude para entender o contexto.
     Retorna (tipo, periodo_hint, categoria_filtro, orientacao)."""
@@ -487,6 +495,10 @@ def _detectar_tipo_grafico(msg: str, api_key: str, usage_out: dict | None = None
     resultado = classificar_grafico(api_key, msg, usage_out=usage_out)
     tipo = resultado.get("tipo")
     if tipo is None:
+        # Fallback determinístico: só usa default se o pedido for genuinamente vago
+        # (ex: "gráfico", "quero um gráfico", "me mostra um gráfico").
+        if _PEDIDO_GRAFICO_GENERICO.match(msg):
+            return "receitas_vs_despesas", None, None, None
         return None, None, None, None
     periodo_hint = resultado.get("periodo") or (
         _extrair_periodo_da_mensagem(m) if tipo in ("despesas_periodo", "pizza") else None
