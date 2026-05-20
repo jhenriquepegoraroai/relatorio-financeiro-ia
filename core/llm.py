@@ -22,6 +22,10 @@ def _parse_resumo(texto: str) -> list[ResumoFinanceiro]:
     return [ResumoFinanceiro.model_validate(item) for item in itens]
 
 
+# ~4 chars/token; deixa ~6k tokens para output e overhead do system prompt
+_OPENAI_MAX_CHARS = 80_000
+
+
 def gerar_resumo_openai(
     conteudo: str,
     api_key: str,
@@ -29,6 +33,10 @@ def gerar_resumo_openai(
     usage_out: dict | None = None,
 ) -> list[ResumoFinanceiro]:
     from openai import OpenAI
+
+    truncado = len(conteudo) > _OPENAI_MAX_CHARS
+    if truncado:
+        conteudo = conteudo[:_OPENAI_MAX_CHARS]
 
     system = _load_prompt("resumo.txt")
     client = OpenAI(api_key=api_key)
@@ -55,7 +63,11 @@ def gerar_resumo_openai(
 
         texto = response.choices[0].message.content or ""
         try:
-            return _parse_resumo(texto)
+            resumos = _parse_resumo(texto)
+            if truncado:
+                for r in resumos:
+                    r.alertas.insert(0, "⚠️ Input truncado (~80k chars): limite de TPM da conta OpenAI")
+            return resumos
         except (json.JSONDecodeError, ValueError):
             if attempt == 1:
                 raise ValueError(f"OpenAI retornou JSON inválido.\nTrecho: {texto[:300]}")
