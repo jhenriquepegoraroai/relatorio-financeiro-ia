@@ -17,7 +17,7 @@ Reduzir o tempo que síndicos e gestores levam para entender a saúde financeira
 
 ### Status atual
 - Funciona ponta a ponta com dados reais (Databricks da Lello)
-- 5 funcionalidades principais validadas (resumo, chat, gráficos, alertas, previsão de caixa)
+- 4 funcionalidades principais validadas (resumo, chat, gráficos, alertas proativos)
 - Custo médio observado: **~R$ 0,25 por relatório completo** (1 condomínio, 2 meses)
 - Falta para produção: autenticação, deploy gerenciado, controle de uso por usuário, fallback de provider
 
@@ -33,7 +33,7 @@ Reduzir o tempo que síndicos e gestores levam para entender a saúde financeira
 ┌──────────────────────────▼──────────────────────────────────┐
 │  App Streamlit (Python)                                     │
 │  ┌──────────┬──────────┬──────────┬──────────────────────┐ │
-│  │ Resumo   │ Chat     │ Gráficos │ Previsão de Caixa    │ │
+│  │ Resumo   │ Chat     │ Gráficos │ Alertas Proativos    │ │
 │  └────┬─────┴────┬─────┴────┬─────┴───────┬──────────────┘ │
 │       │          │          │             │                 │
 │  ┌────▼──────────▼──────────▼─────────────▼──────────────┐ │
@@ -168,14 +168,12 @@ Interface conversacional onde o usuário faz perguntas em linguagem natural. O s
 6 tipos: receitas, despesas, comparativo, pizza, inadimplência, fluxo temporal. O modelo classifica o pedido e o app monta o Plotly correspondente.
 
 ### Alertas proativos
-Acionados automaticamente no resumo:
-- Déficit do mês
-- Inadimplência acima de 5%
-- Despesa específica subiu mais de 15%
-- Receita caiu mais de 10%
-
-### Previsão de caixa (3 meses)
-Projeção linear baseada nos últimos 3 períodos, exibida em gráfico com linha sólida (realizado) → tracejado (projetado).
+Acionados automaticamente no resumo, com 3 níveis (crítico / atenção / info):
+- **Déficit financeiro** (crítico) — resultado do mês negativo
+- **Inadimplência ≥ 15%** (crítico) ou **≥ 5%** (atenção) — % sobre receita total
+- **Alta nas despesas ≥ 15%** (atenção) — variação entre período atual e anterior
+- **Queda na receita ≥ 10%** (atenção) — variação entre período atual e anterior
+- **Margem financeira estreita** (info) — resultado positivo mas < 3% da receita
 
 ### Comparativo de custo em tempo real
 Sidebar mostra:
