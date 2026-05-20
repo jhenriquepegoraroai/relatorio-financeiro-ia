@@ -11,7 +11,6 @@ import plotly.graph_objects as go
 
 from config import settings
 from core.claude import gerar_resumo, stream_chat, classificar_grafico, strip_code_blocks
-from core.llm import gerar_resumo_openai, gerar_resumo_gemini
 from core.db_log import registrar_log, listar_logs
 from core.cost import calcular_custo_usd, custo_brl, USD_TO_BRL, comparar_provedores
 from core.extractor import (
@@ -1120,9 +1119,6 @@ for k, v in [
                        "cost_usd": 0.0, "n_calls": 0, "by_model": {}}),
     ("session_start", None),
     ("periodos_chat", None),
-    ("texto_extracao", ""),
-    ("comparacao", None),
-    ("resumos_providers", None),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
@@ -1180,43 +1176,6 @@ def _accumulate_usage(usage: dict, model: str, uso: str = "Chat") -> None:
     bm["output_tokens"]         += usage.get("output_tokens", 0)
     bm["cache_creation_tokens"] += usage.get("cache_creation_tokens", 0)
     bm["cache_read_tokens"]     += usage.get("cache_read_tokens", 0)
-
-
-def _rodar_todos_providers(texto: str) -> dict:
-    """Executa gerar_resumo nos providers configurados em paralelo.
-    Retorna dict {provider: {resumos, usage} | {erro}}. Anthropic é sempre incluído.
-    """
-    import concurrent.futures
-
-    def _ant():
-        u: dict = {}
-        return gerar_resumo(_api_key(), texto, usage_out=u), u
-
-    def _oai():
-        u: dict = {}
-        return gerar_resumo_openai(texto, settings.openai_api_key, settings.openai_model, u), u
-
-    def _gem():
-        u: dict = {}
-        return gerar_resumo_gemini(texto, settings.gemini_api_key, settings.gemini_model, u), u
-
-    jobs = {"anthropic": _ant}
-    if settings.openai_api_key:
-        jobs["openai"] = _oai
-    if settings.gemini_api_key:
-        jobs["gemini"] = _gem
-
-    result: dict = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(jobs)) as ex:
-        futs = {key: ex.submit(fn) for key, fn in jobs.items()}
-        for key, fut in futs.items():
-            try:
-                resumos, usage = fut.result()
-                result[key] = {"resumos": resumos, "usage": usage}
-            except Exception as e:
-                result[key] = {"erro": str(e)}
-    return result
-
 
 # ─── Ação: gerar ──────────────────────────────────────────────────────────────
 
@@ -1286,21 +1245,10 @@ if gerar:
                         texto = extrair_de_databricks(ref_selecionada, n_meses=2)
                     else:
                         raise
-                progress.progress(0.7, text="Analisando com IA…")
-                st.session_state["texto_extracao"] = texto
-                st.session_state["comparacao"] = None
-                _providers_result = _rodar_todos_providers(texto)
-                st.session_state["resumos_providers"] = _providers_result
-                _ant = _providers_result.get("anthropic", {})
-                if "erro" in _ant:
-                    raise ValueError(_ant["erro"])
-                resumos = _ant["resumos"]
-                _resumo_usage = _ant["usage"]
+                progress.progress(0.7, text="Analisando documentos…")
+                _resumo_usage: dict = {}
+                resumos = gerar_resumo(_api_key(), texto, usage_out=_resumo_usage)
                 _accumulate_usage(_resumo_usage, settings.claude_model, uso="Extração")
-                for _pk, _pm in [("openai", settings.openai_model), ("gemini", settings.gemini_model)]:
-                    _pd = _providers_result.get(_pk, {})
-                    if "usage" in _pd:
-                        _accumulate_usage(_pd["usage"], _pm, uso="Extração")
                 try:
                     registrar_log(
                         referencia=ref_selecionada,
@@ -1338,21 +1286,9 @@ if gerar:
                 secoes_resumo.append(f"=== {arq.name} ===\n{texto}")
             progress.progress(len(arquivos) / (len(arquivos) + 1), text="Analisando documentos…")
             try:
-                _texto_extracao = "\n\n".join(secoes_resumo)
-                st.session_state["texto_extracao"] = _texto_extracao
-                st.session_state["comparacao"] = None
-                _providers_result = _rodar_todos_providers(_texto_extracao)
-                st.session_state["resumos_providers"] = _providers_result
-                _ant = _providers_result.get("anthropic", {})
-                if "erro" in _ant:
-                    raise ValueError(_ant["erro"])
-                resumos = _ant["resumos"]
-                _resumo_usage = _ant["usage"]
+                _resumo_usage: dict = {}
+                resumos = gerar_resumo(_api_key(), "\n\n".join(secoes_resumo), usage_out=_resumo_usage)
                 _accumulate_usage(_resumo_usage, settings.claude_model, uso="Extração")
-                for _pk, _pm in [("openai", settings.openai_model), ("gemini", settings.gemini_model)]:
-                    _pd = _providers_result.get(_pk, {})
-                    if "usage" in _pd:
-                        _accumulate_usage(_pd["usage"], _pm, uso="Extração")
                 try:
                     registrar_log(
                         referencia=", ".join(a.name for a in arquivos),
@@ -1392,34 +1328,7 @@ if gerar:
 
 if st.session_state["resumo_gerado"] and st.session_state["resumos"]:
     st.divider()
-
-    from core.cost import LABELS as _LABELS
-
-    _prov_data  = st.session_state.get("resumos_providers") or {}
-    _prov_order = [p for p in ("anthropic", "openai", "gemini") if p in _prov_data]
-    _prov_meta  = {
-        "anthropic": ("Anthropic", settings.claude_model),
-        "openai":    ("OpenAI",    settings.openai_model),
-        "gemini":    ("Google",    settings.gemini_model),
-    }
-
-    if len(_prov_order) > 1:
-        _tab_labels = []
-        for _pk in _prov_order:
-            _lbl, _mdl = _prov_meta[_pk]
-            _tab_labels.append(f"{_lbl} — {_LABELS.get(_mdl, _mdl)}")
-        _tabs = st.tabs(_tab_labels)
-
-        for _tab, _pk in zip(_tabs, _prov_order):
-            _lbl, _mdl = _prov_meta[_pk]
-            _d = _prov_data[_pk]
-            with _tab:
-                if "erro" in _d:
-                    st.error(f"Erro ao chamar {_lbl}: {_d['erro']}")
-                else:
-                    exibir_relatorio(_d["resumos"])
-    else:
-        exibir_relatorio(st.session_state["resumos"])
+    exibir_relatorio(st.session_state["resumos"])
 
 
     st.divider()

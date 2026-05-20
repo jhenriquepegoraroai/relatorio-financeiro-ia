@@ -11,12 +11,6 @@ class Settings(BaseSettings):
     max_tokens_resumo: int = 16384
     max_tokens_chat: int = 2048
 
-    # Comparativo multi-provider
-    openai_api_key: str = ""
-    openai_model: str = "gpt-5.1"
-    gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-pro"
-
     # Databricks
     databricks_host: str = ""
     databricks_token: str = ""
