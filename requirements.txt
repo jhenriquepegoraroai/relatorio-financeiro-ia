@@ -7,3 +7,5 @@ pandas>=2.0.0
 pydantic>=2.10.0
 pydantic-settings>=2.5.0
 databricks-connect>=14.0
+openai>=1.30.0
+google-genai>=1.0.0

@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 
 from config import settings
 from core.claude import gerar_resumo, stream_chat, classificar_grafico, strip_code_blocks
+from core.llm import gerar_resumo_openai, gerar_resumo_gemini
 from core.db_log import registrar_log, listar_logs
 from core.cost import calcular_custo_usd, custo_brl, USD_TO_BRL, comparar_provedores
 from core.extractor import (
@@ -1119,6 +1120,8 @@ for k, v in [
                        "cost_usd": 0.0, "n_calls": 0, "by_model": {}}),
     ("session_start", None),
     ("periodos_chat", None),
+    ("texto_extracao", ""),
+    ("comparacao", None),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
@@ -1246,6 +1249,8 @@ if gerar:
                     else:
                         raise
                 progress.progress(0.7, text="Analisando documentos…")
+                st.session_state["texto_extracao"] = texto
+                st.session_state["comparacao"] = None
                 _resumo_usage: dict = {}
                 resumos = gerar_resumo(_api_key(), texto, usage_out=_resumo_usage)
                 _accumulate_usage(_resumo_usage, settings.claude_model, uso="Extração")
@@ -1286,8 +1291,11 @@ if gerar:
                 secoes_resumo.append(f"=== {arq.name} ===\n{texto}")
             progress.progress(len(arquivos) / (len(arquivos) + 1), text="Analisando documentos…")
             try:
+                _texto_extracao = "\n\n".join(secoes_resumo)
+                st.session_state["texto_extracao"] = _texto_extracao
+                st.session_state["comparacao"] = None
                 _resumo_usage: dict = {}
-                resumos = gerar_resumo(_api_key(), "\n\n".join(secoes_resumo), usage_out=_resumo_usage)
+                resumos = gerar_resumo(_api_key(), _texto_extracao, usage_out=_resumo_usage)
                 _accumulate_usage(_resumo_usage, settings.claude_model, uso="Extração")
                 try:
                     registrar_log(
@@ -1329,6 +1337,95 @@ if gerar:
 if st.session_state["resumo_gerado"] and st.session_state["resumos"]:
     st.divider()
     exibir_relatorio(st.session_state["resumos"])
+
+    # ─── Comparativo multi-provider ───────────────────────────────────────────
+    _tem_openai = bool(settings.openai_api_key)
+    _tem_gemini = bool(settings.gemini_api_key)
+    if _tem_openai or _tem_gemini:
+        st.divider()
+        st.markdown(
+            '<div style="font-family:Work Sans,sans-serif;font-weight:700;font-size:1.1rem;'
+            'color:#C5002D;margin-bottom:12px;">🔬 Comparar Extração entre Providers</div>',
+            unsafe_allow_html=True,
+        )
+        _providers_label = " + ".join(
+            filter(None, [
+                "OpenAI" if _tem_openai else "",
+                "Google" if _tem_gemini else "",
+            ])
+        )
+        if st.button(f"Rodar extração com {_providers_label}", type="primary"):
+            import concurrent.futures
+            _texto = st.session_state.get("texto_extracao", "")
+            _comp: dict = {}
+
+            def _run_openai():
+                u: dict = {}
+                r = gerar_resumo_openai(_texto, settings.openai_api_key, settings.openai_model, u)
+                return r, u
+
+            def _run_gemini():
+                u: dict = {}
+                r = gerar_resumo_gemini(_texto, settings.gemini_api_key, settings.gemini_model, u)
+                return r, u
+
+            with st.spinner("Rodando extração nos providers selecionados…"):
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as _ex:
+                    _fut_oai = _ex.submit(_run_openai) if _tem_openai else None
+                    _fut_gem = _ex.submit(_run_gemini) if _tem_gemini else None
+                    for _key, _fut, _model in [
+                        ("openai", _fut_oai, settings.openai_model),
+                        ("gemini", _fut_gem, settings.gemini_model),
+                    ]:
+                        if _fut is None:
+                            continue
+                        try:
+                            _resumos_p, _usage_p = _fut.result()
+                            _comp[_key] = {"resumos": _resumos_p, "usage": _usage_p, "model": _model}
+                        except Exception as _e:
+                            _comp[_key] = {"erro": str(_e), "model": _model}
+            st.session_state["comparacao"] = _comp
+
+        _comp_data = st.session_state.get("comparacao")
+        if _comp_data:
+            from core.cost import calcular_custo_usd, custo_brl, LABELS
+
+            # Monta lista de tabs na ordem: Anthropic | OpenAI | Gemini
+            _tab_defs = [("anthropic", "Anthropic", settings.claude_model, st.session_state["resumos"], None)]
+            for _pk, _plabel in [("openai", "OpenAI"), ("gemini", "Google")]:
+                if _pk in _comp_data:
+                    _tab_defs.append((_pk, _plabel, _comp_data[_pk]["model"],
+                                      _comp_data[_pk].get("resumos"), _comp_data[_pk].get("erro")))
+
+            _tabs = st.tabs([
+                f"{lbl} — {LABELS.get(mdl, mdl)}"
+                for _, lbl, mdl, _, _ in _tab_defs
+            ])
+
+            for _tab, (_pk, _plabel, _mdl, _resumos_p, _erro) in zip(_tabs, _tab_defs):
+                with _tab:
+                    if _pk == "anthropic":
+                        _usage_ant = st.session_state.get("session_usage", {})
+                        _custo_ant = _usage_ant.get("cost_usd", 0.0)
+                        st.caption(f"Custo: **${_custo_ant:.4f}** (${custo_brl(_custo_ant):.2f} BRL) — sessão completa")
+                        exibir_relatorio(_resumos_p)
+                    elif _erro:
+                        st.error(f"Erro ao chamar {_plabel}: {_erro}")
+                    else:
+                        _u = _comp_data[_pk]["usage"]
+                        _custo_p = calcular_custo_usd(
+                            _mdl,
+                            _u.get("input_tokens", 0),
+                            _u.get("output_tokens", 0),
+                            _u.get("cache_creation_tokens", 0),
+                            _u.get("cache_read_tokens", 0),
+                        )
+                        st.caption(
+                            f"Custo: **${_custo_p:.4f}** (R${custo_brl(_custo_p):.2f}) · "
+                            f"Input: {_u.get('input_tokens',0):,} tok · "
+                            f"Output: {_u.get('output_tokens',0):,} tok"
+                        )
+                        exibir_relatorio(_resumos_p)
 
 
     st.divider()
