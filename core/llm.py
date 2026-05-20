@@ -47,7 +47,12 @@ def gerar_resumo_openai(
             )
         except RateLimitError as e:
             if attempt < 2:
-                time.sleep(60)
+                wait = 60
+                try:
+                    wait = int(e.response.headers.get("retry-after", 60))
+                except Exception:
+                    pass
+                time.sleep(wait)
                 continue
             raise
 
