@@ -38,7 +38,7 @@ def gerar_resumo_openai(
         try:
             response = client.chat.completions.create(
                 model=model,
-                max_tokens=16384,
+                max_completion_tokens=16384,
                 response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": system},
