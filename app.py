@@ -23,30 +23,71 @@ from core.formatters import brl
 from core.models import ResumoFinanceiro
 
 st.set_page_config(
-    page_title="Relatório Financeiro por IA",
-    page_icon="📊",
+    page_title="Relatório Financeiro com IA",
+    page_icon="🏢",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 # ─── Design System: Heritage Corporate ───────────────────────────────────────
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Work+Sans:wght@500;600&family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Work+Sans:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
 
-/* Headings → Work Sans */
-h1, h2, h3,
-[data-testid="stSidebar"] h1,
-[data-testid="stSidebar"] h2 {
-    font-family: 'Work Sans', sans-serif !important;
-    color: #7a0022 !important;
+/* ── Fontes ── */
+h1, h2, h3 { font-family: 'Work Sans', sans-serif !important; color: #C5002D !important; }
+html, body, .stMarkdown, p, input, textarea, label, .stChatMessage, table, td, th, li {
+    font-family: 'Inter', sans-serif !important;
 }
 
-/* Body / labels / inputs / tabelas → Inter */
-html, body, .stMarkdown, p,
-input, textarea, label, .stChatMessage,
-table, td, th, li {
-    font-family: 'Inter', sans-serif !important;
+/* ── Só esconde o botão Deploy, sem tocar no header ── */
+[data-testid="stToolbar"] { visibility: hidden !important; }
+
+/* ── Sidebar ── */
+[data-testid="stSidebar"] { background: #ffffff !important; border-right: 2px solid #f0f0f0 !important; }
+[data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {
+    font-family: 'Inter', sans-serif !important; color: #C5002D !important;
+    font-size: 0.82rem !important; font-weight: 700 !important;
+    text-transform: uppercase; letter-spacing: 0.08em;
+}
+[data-testid="stSelectbox"] label {
+    font-family: 'Inter', sans-serif !important; font-size: 0.82rem !important;
+    font-weight: 700 !important; color: #C5002D !important;
+    text-transform: uppercase; letter-spacing: 0.08em;
+}
+
+/* ── Botão primário ── */
+button[data-testid="baseButton-primary"] {
+    background: #C5002D !important; color: white !important;
+    border: none !important; border-radius: 6px !important;
+    font-weight: 600 !important;
+}
+button[data-testid="baseButton-primary"]:hover { background: #9A001F !important; }
+
+/* ── Métricas como cards ── */
+[data-testid="stMetric"] {
+    background: white; border: 1px solid #e8e8e8;
+    border-top: 3px solid #C5002D; border-radius: 8px;
+    padding: 12px 14px !important; box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+[data-testid="stMetricLabel"] {
+    font-size: 0.72rem !important; font-weight: 600 !important;
+    color: #888 !important; text-transform: uppercase; letter-spacing: 0.05em;
+}
+
+/* ── Expanders ── */
+[data-testid="stExpander"] { border: 1px solid #e8e8e8 !important; border-radius: 8px !important; }
+[data-testid="stExpander"] summary {
+    font-weight: 600 !important; font-size: 0.85rem !important;
+    background: #f8f8f8 !important;
+}
+[data-testid="stExpander"] summary:hover { background: #FDEEF1 !important; color: #C5002D !important; }
+
+/* ── Chat input ── */
+[data-testid="stChatInput"] textarea:focus {
+    border-color: #C5002D !important;
+    box-shadow: 0 0 0 2px rgba(197,0,45,0.1) !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -128,16 +169,16 @@ def _alinhar(listas: list, key_fn) -> dict[str, list[float]]:
 # ─── Helpers de estilo HTML ───────────────────────────────────────────────────
 
 _C = {
-    "titulo":    "background:#7a0022;color:white;font-weight:bold;text-align:center;padding:10px 8px;font-size:1.05em;",
-    "subtitulo": "background:#a30c33;color:white;text-align:center;padding:4px 8px;font-size:0.88em;",
-    "sec_blu":   "background:#a30c33;color:white;font-weight:bold;padding:5px 10px;",
-    "sec_red":   "background:#7a0022;color:white;font-weight:bold;padding:5px 10px;",
-    "col_hdr":   "background:#7a0022;color:white;font-weight:bold;padding:5px 10px;text-align:right;white-space:nowrap;",
-    "col_hdr_l": "background:#7a0022;color:white;font-weight:bold;padding:5px 10px;text-align:left;",
+    "titulo":    "background:#C5002D;color:white;font-weight:bold;text-align:center;padding:10px 8px;font-size:1.05em;",
+    "subtitulo": "background:#9A001F;color:white;text-align:center;padding:4px 8px;font-size:0.88em;",
+    "sec_blu":   "background:#9A001F;color:white;font-weight:bold;padding:5px 10px;",
+    "sec_red":   "background:#C5002D;color:white;font-weight:bold;padding:5px 10px;",
+    "col_hdr":   "background:#C5002D;color:white;font-weight:bold;padding:5px 10px;text-align:right;white-space:nowrap;",
+    "col_hdr_l": "background:#C5002D;color:white;font-weight:bold;padding:5px 10px;text-align:left;",
     "tot":       "background:#e2e2e2;font-weight:bold;padding:5px 10px;text-align:right;",
     "tot_l":     "background:#e2e2e2;font-weight:bold;padding:5px 10px;text-align:left;",
-    "res":       "background:#7a0022;color:white;font-weight:bold;padding:5px 10px;text-align:right;",
-    "res_l":     "background:#7a0022;color:white;font-weight:bold;padding:5px 10px;text-align:left;",
+    "res":       "background:#C5002D;color:white;font-weight:bold;padding:5px 10px;text-align:right;",
+    "res_l":     "background:#C5002D;color:white;font-weight:bold;padding:5px 10px;text-align:left;",
     "d0":        "background:#ffffff;padding:4px 10px;text-align:right;border-bottom:1px solid #e1bebf;",
     "d0l":       "background:#ffffff;padding:4px 10px;text-align:left;border-bottom:1px solid #e1bebf;",
     "d1":        "background:#f3f3f3;padding:4px 10px;text-align:right;border-bottom:1px solid #e1bebf;",
@@ -380,13 +421,13 @@ def _exibir_previsao_caixa(periodos: list[ResumoFinanceiro]) -> None:
     fig.add_trace(go.Scatter(
         x=labels_hist, y=despesas_hist,
         name="Despesas (realizado)", mode="lines+markers",
-        line=dict(color="#7a0022", width=2.5),
+        line=dict(color="#C5002D", width=2.5),
         marker=dict(size=8),
         hovertemplate="<b>%{x}</b><br>Despesa realizada: R$ %{y:,.2f}<extra></extra>",
     ))
 
     # Linhas de conexão (histórico → projeção)
-    for cor, hist, proj in [("#006d2f", receitas_hist, rec_proj), ("#7a0022", despesas_hist, desp_proj)]:
+    for cor, hist, proj in [("#006d2f", receitas_hist, rec_proj), ("#C5002D", despesas_hist, desp_proj)]:
         fig.add_trace(go.Scatter(
             x=[labels_hist[-1], labels_proj[0]], y=[hist[-1], proj[0]],
             mode="lines", line=dict(color=cor, width=1.5, dash="dot"),
@@ -403,7 +444,7 @@ def _exibir_previsao_caixa(periodos: list[ResumoFinanceiro]) -> None:
     fig.add_trace(go.Scatter(
         x=labels_proj, y=desp_proj,
         name="Despesas (projetado)", mode="lines+markers",
-        line=dict(color="#7a0022", width=2, dash="dash"),
+        line=dict(color="#C5002D", width=2, dash="dash"),
         marker=dict(size=8, symbol="diamond"),
         hovertemplate="<b>%{x}</b><br>Despesa projetada: R$ %{y:,.2f}<extra></extra>",
     ))
@@ -456,7 +497,7 @@ def _exibir_previsao_caixa(periodos: list[ResumoFinanceiro]) -> None:
         )
     st.markdown(
         '<table style="width:100%;border-collapse:collapse;font-size:0.85em;margin-top:4px;">'
-        '<tr style="background:#7a0022;color:white;">'
+        '<tr style="background:#C5002D;color:white;">'
         '<th style="padding:8px 12px;text-align:left;font-family:Inter,sans-serif;">Período</th>'
         '<th style="padding:8px 12px;text-align:right;font-family:Inter,sans-serif;">Receita Projetada</th>'
         '<th style="padding:8px 12px;text-align:right;font-family:Inter,sans-serif;">Despesa Projetada</th>'
@@ -544,7 +585,7 @@ def exibir_relatorio(periodos: list[ResumoFinanceiro]):
         for p in periodos:
             if n > 1:
                 st.markdown(f"<p style='font-family:Inter,sans-serif;font-weight:600;"
-                            f"color:#7a0022;margin:8px 0 4px;'>{p.periodo}</p>",
+                            f"color:#C5002D;margin:8px 0 4px;'>{p.periodo}</p>",
                             unsafe_allow_html=True)
             # Une panorama (3 bullets) + alertas, limitado a 5 itens no total
             linhas_panorama = [l.lstrip("• ").strip() for l in p.panorama.splitlines() if l.strip()]
@@ -706,7 +747,7 @@ def _grafico_por_tipo(
         fig = px.bar(
             x=x_vals, y=y_vals,
             orientation=orient, title=f"Inadimplência — {ultimo.periodo}",
-            color_discrete_sequence=["#7a0022"],
+            color_discrete_sequence=["#C5002D"],
             labels={"x": "Valor (R$)" if _vert else "", "y": "" if _vert else "Valor (R$)"},
         )
         if _vert:
@@ -720,7 +761,7 @@ def _grafico_por_tipo(
                        marker_color="#006d2f", orientation="h"),
                 go.Bar(name="Despesas", y=[p.periodo for p in periodos_ord],
                        x=[p.indicadores.despesa_total for p in periodos_ord],
-                       marker_color="#7a0022", orientation="h"),
+                       marker_color="#C5002D", orientation="h"),
             ])
             fig.update_layout(barmode="group", title="Receitas vs Despesas por Período",
                               xaxis_title="Valor (R$)")
@@ -731,7 +772,7 @@ def _grafico_por_tipo(
                        marker_color="#006d2f"),
                 go.Bar(name="Despesas", x=[p.periodo for p in periodos_ord],
                        y=[p.indicadores.despesa_total for p in periodos_ord],
-                       marker_color="#7a0022"),
+                       marker_color="#C5002D"),
             ])
             fig.update_layout(barmode="group", title="Receitas vs Despesas por Período",
                               yaxis_title="Valor (R$)")
@@ -839,7 +880,7 @@ _SUGESTOES_MULTI = [
 _CHIP_CSS = """
 <style>
 .chip-anchor + div [data-testid="stButton"] button {
-    background: linear-gradient(135deg, #7a0022 0%, #a30c33 100%);
+    background: linear-gradient(135deg, #C5002D 0%, #9A001F 100%);
     color: white !important;
     border: none;
     border-radius: 20px;
@@ -886,11 +927,26 @@ def _chips_sugestao(n_periodos: int) -> None:
 
 # ─── UI ───────────────────────────────────────────────────────────────────────
 
-st.title("📊 Relatório Financeiro por IA")
-st.caption("POC — dados via Databricks · Análise com IA")
+# Título alinhado à esquerda com tipografia Lello
+st.markdown(
+    '<div style="padding:20px 0 18px;border-bottom:3px solid #C5002D;margin-bottom:2rem;">'
+    '<div style="font-family:Georgia,serif;font-style:italic;font-weight:700;font-size:1.9rem;color:#C5002D;line-height:1.1;">Relat&#243;rio Financeiro com IA</div>'
+    '</div>',
+    unsafe_allow_html=True,
+)
 
 with st.sidebar:
-    st.header("Relatórios")
+    # ── Logo Lello ────────────────────────────────────────────────────────────
+    st.markdown(
+        '<div style="padding:4px 0 14px;border-bottom:2px solid #f0f0f0;margin-bottom:0;">'
+        '<div style="font-family:Georgia,serif;font-style:italic;font-weight:700;font-size:2rem;color:#C5002D;line-height:1;">lello</div>'
+        '<div style="font-family:Inter,sans-serif;font-size:0.55rem;font-weight:700;color:#C5002D;letter-spacing:0.22em;text-transform:uppercase;margin-top:2px;">CONDOM&#205;NIOS</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── Seção 1: Condomínio ───────────────────────────────────────────────────
+    st.markdown('<div style="height:14px;"></div>', unsafe_allow_html=True)
     if _databricks_configurado():
         # Tenta conectar apenas uma vez por sessão; erros ficam guardados no estado
         if "refs_ok" not in st.session_state:
@@ -941,9 +997,9 @@ with st.sidebar:
         )
     gerar = st.button("Gerar Resumo Executivo", type="primary", use_container_width=True)
 
-    st.divider()
-
-    # ── Custo da sessão ──────────────────────────────────────────────────────
+    # ── Seção 2: Custo da sessão ─────────────────────────────────────────────
+    st.markdown('<div style="border-top:1px solid #eee;margin:18px 0 10px;"></div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-size:0.72rem;font-weight:700;color:#C5002D;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:10px;">Custo da Sess&#227;o</div>', unsafe_allow_html=True)
     _su = st.session_state.setdefault("session_usage", {
         "input_tokens": 0, "output_tokens": 0,
         "cache_creation_tokens": 0, "cache_read_tokens": 0,
@@ -951,11 +1007,30 @@ with st.sidebar:
     })
     _su.setdefault("by_model", {})
     _cost_brl = custo_brl(_su["cost_usd"])
-    st.markdown("**Custo da Sessão**")
+
+    def _mini_card(col, label, value, delta=None, delta_color=None):
+        delta_html = ""
+        if delta:
+            if delta_color == "off":
+                delta_html = f'<div style="font-size:0.65rem;color:#888;margin-top:2px">{delta}</div>'
+            elif delta and delta != "—":
+                c = "#e03131" if str(delta).startswith("+") else "#2f9e44"
+                delta_html = f'<div style="font-size:0.65rem;color:{c};margin-top:2px">{delta}</div>'
+        col.markdown(
+            f'<div style="background:#f9f9f9;border:1px solid #eee;border-radius:6px;'
+            f'padding:5px 6px;text-align:center;min-width:0">'
+            f'<div style="font-size:0.62rem;color:#666;margin-bottom:2px;white-space:nowrap;'
+            f'overflow:hidden;text-overflow:ellipsis">{label}</div>'
+            f'<div style="font-size:0.82rem;font-weight:700;color:#222;'
+            f'word-break:break-all;line-height:1.2">{value}</div>'
+            f'{delta_html}</div>',
+            unsafe_allow_html=True,
+        )
+
     _c1, _c2, _c3 = st.columns(3)
-    _c1.metric("USD", f"$ {_su['cost_usd']:.4f}")
-    _c2.metric("BRL", f"R$ {_cost_brl:.4f}")
-    _c3.metric("Chamadas", _su["n_calls"])
+    _mini_card(_c1, "USD",     f"$ {_su['cost_usd']:.4f}")
+    _mini_card(_c2, "BRL",     f"R$ {_cost_brl:.4f}")
+    _mini_card(_c3, "Chamadas", str(_su["n_calls"]))
     _cache_pct = (
         round(_su["cache_read_tokens"] / max(_su["input_tokens"] + _su["cache_read_tokens"], 1) * 100)
         if _su["n_calls"] > 0 else 0
@@ -966,9 +1041,11 @@ with st.sidebar:
         f"Cache: {_su['cache_read_tokens']:,} tok ({_cache_pct}%)"
     )
 
-    # ── Comparativo de provedores ─────────────────────────────────────────────
+    # ── Seção 3: Comparativo de provedores ───────────────────────────────────
+    st.markdown('<div style="border-top:1px solid #eee;margin:14px 0 10px;"></div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-size:0.72rem;font-weight:700;color:#C5002D;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:10px;">Comparativo de Provedores</div>', unsafe_allow_html=True)
     _linhas = comparar_provedores(_su.get("by_model", {})) if _su["n_calls"] > 0 else []
-    with st.expander("💰 Comparativo de Provedores", expanded=False):
+    with st.expander("Ver comparativo", expanded=False):
         if not _linhas:
             st.caption("Nenhuma chamada na sessão ainda.")
         else:
@@ -983,39 +1060,47 @@ with st.sidebar:
                 sinal = "+" if pct > 0 else ""
                 return f"{sinal}{pct:.0f}%"
 
-            # Tabela por uso (Extração / Chat)
+            # Tabela por uso (Extração / Chat / Gráfico)
             for r in _linhas:
-                st.markdown(f"**{r['uso']}**")
+                st.markdown(
+                    f'<div style="font-size:0.9rem;font-weight:700;color:#C5002D;margin:6px 0 4px">{r["uso"]}</div>',
+                    unsafe_allow_html=True,
+                )
                 _ca, _co, _cg = st.columns(3)
-                _ca.metric("Anthropic",    f"${r['custo_anthropic']:.4f}", r['modelo_anthropic'], delta_color="off")
-                _co.metric("OpenAI",       f"${r['custo_openai']:.4f}",    r['modelo_openai'],    delta_color="off")
-                _cg.metric("Google",       f"${r['custo_gemini']:.4f}",    r['modelo_gemini'],    delta_color="off")
+                _mini_card(_ca, "Anthropic", f"${r['custo_anthropic']:.4f}", r['modelo_anthropic'], delta_color="off")
+                _mini_card(_co, "OpenAI",    f"${r['custo_openai']:.4f}",    r['modelo_openai'],    delta_color="off")
+                _mini_card(_cg, "Google",    f"${r['custo_gemini']:.4f}",    r['modelo_gemini'],    delta_color="off")
 
             st.divider()
             # Linha de totais com deltas
             _ta, _to, _tg = st.columns(3)
-            _ta.metric("Total Anthropic", f"${_total_a:.4f}", "atual",              delta_color="off")
-            _to.metric("Total OpenAI",    f"${_total_o:.4f}", _delta(_total_o, _total_a))
-            _tg.metric("Total Google",    f"${_total_g:.4f}", _delta(_total_g, _total_a))
+            _mini_card(_ta, "Total Anthropic", f"${_total_a:.4f}", "atual",                   delta_color="off")
+            _mini_card(_to, "Total OpenAI",    f"${_total_o:.4f}", _delta(_total_o, _total_a))
+            _mini_card(_tg, "Total Google",    f"${_total_g:.4f}", _delta(_total_g, _total_a))
             st.caption("⚠️ Estimativa: mesmos tokens, modelos equivalentes. "
                        "Cache do Gemini exclui custo de armazenamento/hora.")
 
-    st.divider()
-    with st.expander("📋 Histórico de Interações", expanded=False):
+    # ── Seção 4: Histórico ───────────────────────────────────────────────────
+    st.markdown('<div style="border-top:1px solid #eee;margin:14px 0 10px;"></div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-size:0.72rem;font-weight:700;color:#C5002D;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:10px;">Hist&#243;rico</div>', unsafe_allow_html=True)
+    with st.expander("Ver interações da sessão", expanded=False):
         import pandas as _pd
-        _logs = listar_logs(limit=500)
         _session_start = st.session_state.get("session_start")
-        if _logs and _session_start:
-            _logs = [r for r in _logs if r["timestamp"] >= _session_start]
-        if _logs:
-            _df_logs = _pd.DataFrame(_logs)[
-                ["timestamp", "referencia", "pergunta", "resposta",
-                 "modelo", "input_tokens", "output_tokens",
-                 "cache_creation_tokens", "cache_read_tokens", "sql_usado"]
-            ]
-            st.dataframe(_df_logs, use_container_width=True)
-        else:
+        if not _session_start:
             st.info("Nenhuma interação nesta sessão ainda.")
+        else:
+            _logs = listar_logs(limit=500)
+            _logs = [r for r in _logs if r["timestamp"] >= _session_start]
+            _logs = list(reversed(_logs))  # mais antiga primeiro
+            if _logs:
+                _df_logs = _pd.DataFrame(_logs)[
+                    ["timestamp", "referencia", "pergunta", "resposta",
+                     "modelo", "input_tokens", "output_tokens",
+                     "cache_creation_tokens", "cache_read_tokens", "sql_usado"]
+                ]
+                st.dataframe(_df_logs, use_container_width=True)
+            else:
+                st.info("Nenhuma interação nesta sessão ainda.")
 
 
 # ─── Estado da sessão ─────────────────────────────────────────────────────────
@@ -1064,7 +1149,7 @@ def _preparar_historico(dados: str, historico: list[dict]) -> list[dict]:
     return trimado
 
 
-def _accumulate_usage(usage: dict, model: str) -> None:
+def _accumulate_usage(usage: dict, model: str, uso: str = "Chat") -> None:
     from datetime import datetime, timezone
     su = st.session_state["session_usage"]
     if st.session_state["session_start"] is None:
@@ -1081,8 +1166,9 @@ def _accumulate_usage(usage: dict, model: str) -> None:
         usage.get("cache_read_tokens", 0),
     )
     su["n_calls"] += 1
-    # Acumula por modelo para o comparativo de provedores
-    bm = su.setdefault("by_model", {}).setdefault(model, {
+    # Acumula por "uso:modelo" para o comparativo de provedores
+    key = f"{uso}:{model}"
+    bm = su.setdefault("by_model", {}).setdefault(key, {
         "input_tokens": 0, "output_tokens": 0,
         "cache_creation_tokens": 0, "cache_read_tokens": 0,
     })
@@ -1162,7 +1248,7 @@ if gerar:
                 progress.progress(0.7, text="Analisando documentos…")
                 _resumo_usage: dict = {}
                 resumos = gerar_resumo(_api_key(), texto, usage_out=_resumo_usage)
-                _accumulate_usage(_resumo_usage, settings.claude_model)
+                _accumulate_usage(_resumo_usage, settings.claude_model, uso="Extração")
                 try:
                     registrar_log(
                         referencia=ref_selecionada,
@@ -1202,7 +1288,7 @@ if gerar:
             try:
                 _resumo_usage: dict = {}
                 resumos = gerar_resumo(_api_key(), "\n\n".join(secoes_resumo), usage_out=_resumo_usage)
-                _accumulate_usage(_resumo_usage, settings.claude_model)
+                _accumulate_usage(_resumo_usage, settings.claude_model, uso="Extração")
                 try:
                     registrar_log(
                         referencia=", ".join(a.name for a in arquivos),
@@ -1308,7 +1394,7 @@ if st.session_state["resumo_gerado"] and st.session_state["resumos"]:
         _grafico_usage: dict = {}
         tipo_grafico, periodo_hint, categoria_filtro, orientacao = _detectar_tipo_grafico(pergunta, _api_key(), usage_out=_grafico_usage)
         if _grafico_usage:
-            _accumulate_usage(_grafico_usage, settings.claude_model_chat)
+            _accumulate_usage(_grafico_usage, settings.claude_model_chat, uso="Gráfico")
         components.html(_SCROLL_JS, height=0)
 
         with st.chat_message("user"):
@@ -1376,7 +1462,7 @@ if st.session_state["resumo_gerado"] and st.session_state["resumos"]:
                     break
 
         if _usage:
-            _accumulate_usage(_usage, settings.claude_model_chat)
+            _accumulate_usage(_usage, settings.claude_model_chat, uso="Chat")
         try:
             registrar_log(
                 referencia=str(st.session_state.get("referencia_atual") or "arquivo"),

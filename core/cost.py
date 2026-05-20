@@ -49,10 +49,9 @@ _DEFAULT_PRICING = _PRICING["claude-haiku-4-5-20251001"]
 # Taxa de câmbio fixa para estimativa (não é financeiramente precisa)
 USD_TO_BRL: float = 5.70
 
-# Modelos equivalentes por caso de uso
-# (chave = modelo Claude usado, valor = [modelo_openai, modelo_gemini])
+# Modelos equivalentes por modelo Claude
 EQUIVALENCIAS: dict[str, tuple[str, str]] = {
-    "claude-sonnet-4-6":          ("gpt-5.1",    "gemini-2.5-flash"),
+    "claude-sonnet-4-6":          ("gpt-5.1",    "gemini-2.5-pro"),
     "claude-haiku-4-5-20251001":  ("gpt-5-mini", "gemini-2.5-flash"),
 }
 
@@ -87,37 +86,52 @@ def custo_brl(cost_usd: float) -> float:
     return cost_usd * USD_TO_BRL
 
 
+_ORDEM_USO = ["Extração", "Chat", "Gráfico"]
+
+
 def comparar_provedores(by_model: dict[str, dict]) -> list[dict]:
     """Retorna lista de linhas para a tabela comparativa de provedores.
 
     Cada linha: {uso, modelo_anthropic, modelo_openai, modelo_gemini,
                  custo_anthropic, custo_openai, custo_gemini}
 
-    `by_model` é o dict session_usage["by_model"]:
-        {"claude-haiku-4-5-20251001": {tokens...}, "claude-sonnet-4-6": {tokens...}}
+    `by_model` usa chaves no formato "uso:claude_model", ex.:
+        {"Chat:claude-haiku-4-5-20251001": {tokens...},
+         "Gráfico:claude-haiku-4-5-20251001": {tokens...},
+         "Extração:claude-sonnet-4-6": {tokens...}}
+
+    Chaves legadas sem ":" (somente modelo) ainda são aceitas para
+    compatibilidade com sessões iniciadas antes desta versão.
     """
     linhas = []
-    for claude_model, tokens in by_model.items():
+    for key, tokens in by_model.items():
         if not any(tokens.values()):
             continue
+        if ":" in key:
+            uso, claude_model = key.split(":", 1)
+        else:
+            # compatibilidade com formato antigo
+            claude_model = key
+            uso = "Extração" if "sonnet" in claude_model else "Chat"
         eq_openai, eq_gemini = EQUIVALENCIAS.get(
-            claude_model, ("gpt-5.1", "gemini-2.5-flash")
+            claude_model, ("gpt-5.1", "gemini-2.5-pro")
         )
-        def _custo(model):
+        def _custo(model, t=tokens):
             return calcular_custo_usd(
                 model,
-                tokens.get("input_tokens", 0),
-                tokens.get("output_tokens", 0),
-                tokens.get("cache_creation_tokens", 0),
-                tokens.get("cache_read_tokens", 0),
+                t.get("input_tokens", 0),
+                t.get("output_tokens", 0),
+                t.get("cache_creation_tokens", 0),
+                t.get("cache_read_tokens", 0),
             )
         linhas.append({
-            "uso":              "Extração" if "sonnet" in claude_model else "Chat",
-            "modelo_anthropic": LABELS[claude_model],
-            "modelo_openai":    LABELS[eq_openai],
-            "modelo_gemini":    LABELS[eq_gemini],
+            "uso":              uso,
+            "modelo_anthropic": LABELS.get(claude_model, claude_model),
+            "modelo_openai":    LABELS.get(eq_openai, eq_openai),
+            "modelo_gemini":    LABELS.get(eq_gemini, eq_gemini),
             "custo_anthropic":  _custo(claude_model),
             "custo_openai":     _custo(eq_openai),
             "custo_gemini":     _custo(eq_gemini),
         })
+    linhas.sort(key=lambda r: _ORDEM_USO.index(r["uso"]) if r["uso"] in _ORDEM_USO else 99)
     return linhas
