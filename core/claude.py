@@ -96,6 +96,7 @@ REGRAS DE CLASSIFICAÇÃO:
 - "evolução das receitas", "receitas ao longo do tempo", "receitas nos últimos X meses" → receitas_comparativo
 - "receitas de [mês]" ou sem referência temporal múltipla → receitas
 - "comparar receitas e despesas" ou "receitas vs despesas" → receitas_vs_despesas
+- Pedido vago sem especificar tipo (ex: "quero um gráfico", "me mostra um gráfico", "gráfico") → receitas_vs_despesas (visão geral padrão)
 
 "categoria": nome da categoria financeira mencionada (ex: "fundo de reserva"), ou null se não mencionada.
 "periodo": mês/ano mencionado (ex: "janeiro", "março/2026"), ou null se não mencionado.
