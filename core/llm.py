@@ -22,35 +22,35 @@ def _parse_resumo(texto: str) -> list[ResumoFinanceiro]:
     return [ResumoFinanceiro.model_validate(item) for item in itens]
 
 
-# ~4 chars/token; deixa ~6k tokens para output e overhead do system prompt
-_OPENAI_MAX_CHARS = 80_000
-
-
 def gerar_resumo_openai(
     conteudo: str,
     api_key: str,
     model: str,
     usage_out: dict | None = None,
 ) -> list[ResumoFinanceiro]:
-    from openai import OpenAI
-
-    truncado = len(conteudo) > _OPENAI_MAX_CHARS
-    if truncado:
-        conteudo = conteudo[:_OPENAI_MAX_CHARS]
+    import time
+    from openai import OpenAI, RateLimitError
 
     system = _load_prompt("resumo.txt")
     client = OpenAI(api_key=api_key)
 
-    for attempt in range(2):
-        response = client.chat.completions.create(
-            model=model,
-            max_tokens=16384,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": conteudo},
-            ],
-        )
+    for attempt in range(3):
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                max_tokens=16384,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": conteudo},
+                ],
+            )
+        except RateLimitError as e:
+            if attempt < 2:
+                time.sleep(60)
+                continue
+            raise
+
         if usage_out is not None:
             u = response.usage
             cached = 0
@@ -63,13 +63,9 @@ def gerar_resumo_openai(
 
         texto = response.choices[0].message.content or ""
         try:
-            resumos = _parse_resumo(texto)
-            if truncado:
-                for r in resumos:
-                    r.alertas.insert(0, "⚠️ Input truncado (~80k chars): limite de TPM da conta OpenAI")
-            return resumos
+            return _parse_resumo(texto)
         except (json.JSONDecodeError, ValueError):
-            if attempt == 1:
+            if attempt == 2:
                 raise ValueError(f"OpenAI retornou JSON inválido.\nTrecho: {texto[:300]}")
     return []
 
