@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     # Comparativo multi-provider
     openai_api_key: str = ""
-    openai_model: str = "gpt-4.1"
+    openai_model: str = "gpt-5.1"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-pro"
 
