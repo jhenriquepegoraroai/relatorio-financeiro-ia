@@ -1297,6 +1297,10 @@ if gerar:
                 resumos = _ant["resumos"]
                 _resumo_usage = _ant["usage"]
                 _accumulate_usage(_resumo_usage, settings.claude_model, uso="Extração")
+                for _pk, _pm in [("openai", settings.openai_model), ("gemini", settings.gemini_model)]:
+                    _pd = _providers_result.get(_pk, {})
+                    if "usage" in _pd:
+                        _accumulate_usage(_pd["usage"], _pm, uso="Extração")
                 try:
                     registrar_log(
                         referencia=ref_selecionada,
@@ -1345,6 +1349,10 @@ if gerar:
                 resumos = _ant["resumos"]
                 _resumo_usage = _ant["usage"]
                 _accumulate_usage(_resumo_usage, settings.claude_model, uso="Extração")
+                for _pk, _pm in [("openai", settings.openai_model), ("gemini", settings.gemini_model)]:
+                    _pd = _providers_result.get(_pk, {})
+                    if "usage" in _pd:
+                        _accumulate_usage(_pd["usage"], _pm, uso="Extração")
                 try:
                     registrar_log(
                         referencia=", ".join(a.name for a in arquivos),
@@ -1385,7 +1393,7 @@ if gerar:
 if st.session_state["resumo_gerado"] and st.session_state["resumos"]:
     st.divider()
 
-    from core.cost import calcular_custo_usd, custo_brl, LABELS as _LABELS
+    from core.cost import LABELS as _LABELS
 
     _prov_data  = st.session_state.get("resumos_providers") or {}
     _prov_order = [p for p in ("anthropic", "openai", "gemini") if p in _prov_data]
@@ -1409,19 +1417,6 @@ if st.session_state["resumo_gerado"] and st.session_state["resumos"]:
                 if "erro" in _d:
                     st.error(f"Erro ao chamar {_lbl}: {_d['erro']}")
                 else:
-                    _u = _d["usage"]
-                    _custo = calcular_custo_usd(
-                        _mdl,
-                        _u.get("input_tokens", 0),
-                        _u.get("output_tokens", 0),
-                        _u.get("cache_creation_tokens", 0),
-                        _u.get("cache_read_tokens", 0),
-                    )
-                    st.caption(
-                        f"Custo: **${_custo:.4f}** (R${custo_brl(_custo):.2f}) · "
-                        f"Input: {_u.get('input_tokens', 0):,} tok · "
-                        f"Output: {_u.get('output_tokens', 0):,} tok"
-                    )
                     exibir_relatorio(_d["resumos"])
     else:
         exibir_relatorio(st.session_state["resumos"])
